@@ -1,0 +1,46 @@
+@import "tailwindcss";
+
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0a0a0a;
+    --foreground: #ededed;
+  }
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+/* ── Global input/select/textarea styles ── */
+/* Use @layer base so Tailwind v4 doesn't override these */
+@layer base {
+  input,
+  select,
+  textarea {
+    color: #1e293b !important; /* slate-800 — visible typed text */
+  }
+
+  input::placeholder,
+  textarea::placeholder {
+    color: #94a3b8 !important; /* slate-400 — visible but clearly secondary */
+    opacity: 1 !important;     /* Firefox resets opacity on placeholders */
+  }
+
+  select option {
+    color: #1e293b;
+  }
+}

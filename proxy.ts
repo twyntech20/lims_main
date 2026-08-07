@@ -1,0 +1,97 @@
+import { createServerClient } from '@supabase/ssr'
+import { NextResponse, type NextRequest } from 'next/server'
+
+const PUBLIC_PATHS = ['/login', '/client-login', '/auth/callback', '/auth/reset-password', '/force-password-change']
+
+const ROLE_HOME: Record<string, string> = {
+  admin: '/admin/dashboard',
+  manager: '/admin/dashboard',
+  analyst: '/analyst/dashboard',
+  client: '/client/dashboard',
+}
+
+export async function proxy(request: NextRequest) {
+  let supabaseResponse = NextResponse.next({ request })
+
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll() {
+          return request.cookies.getAll()
+        },
+        setAll(cookiesToSet) {
+          cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value))
+          supabaseResponse = NextResponse.next({ request })
+          cookiesToSet.forEach(({ name, value, options }) =>
+            supabaseResponse.cookies.set(name, value, options)
+          )
+        },
+      },
+    }
+  )
+
+  const { data: { user } } = await supabase.auth.getUser()
+  const pathname = request.nextUrl.pathname
+
+  // Allow public paths
+  if (PUBLIC_PATHS.some(p => pathname.startsWith(p))) {
+    // Redirect logged-in users away from login pages
+    if (user && (pathname === '/login' || pathname === '/client-login')) {
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', user.id)
+        .single()
+
+      const home = ROLE_HOME[profile?.role ?? 'client']
+      return NextResponse.redirect(new URL(home, request.url))
+    }
+    return supabaseResponse
+  }
+
+  // Not logged in → redirect to appropriate login
+  if (!user) {
+    const dest = pathname.startsWith('/client') ? '/client-login' : '/login'
+    return NextResponse.redirect(new URL(dest, request.url))
+  }
+
+  // Get user role + force_password_change for route protection
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('role, force_password_change')
+    .eq('id', user.id)
+    .single()
+
+  const role = profile?.role ?? 'client'
+
+  // Force password change check
+  if (profile?.force_password_change === true && pathname !== '/force-password-change') {
+    return NextResponse.redirect(new URL('/force-password-change', request.url))
+  }
+
+  // Root redirect
+  if (pathname === '/') {
+    return NextResponse.redirect(new URL(ROLE_HOME[role], request.url))
+  }
+
+  // Route guard: clients cannot access admin/analyst routes
+  if (pathname.startsWith('/admin') && !['admin', 'manager'].includes(role)) {
+    return NextResponse.redirect(new URL(ROLE_HOME[role], request.url))
+  }
+
+  if (pathname.startsWith('/analyst') && role === 'client') {
+    return NextResponse.redirect(new URL(ROLE_HOME[role], request.url))
+  }
+
+  if (pathname.startsWith('/client') && role !== 'client') {
+    return NextResponse.redirect(new URL(ROLE_HOME[role], request.url))
+  }
+
+  return supabaseResponse
+}
+
+export const config = {
+  matcher: ['/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)'],
+}
