@@ -33,8 +33,9 @@ export default async function ClientOrderDetailPage({ params }: Props) {
       samples(
         id, sample_id, description, matrix_type, collection_date, status,
         sample_tests(
-          id, status, result, unit, qualifier,
-          tests(id, name, code)
+          id, status,
+          tests(id, name, code),
+          results(value, unit, status, notes)
         )
       )
     `)
@@ -110,8 +111,8 @@ export default async function ClientOrderDetailPage({ params }: Props) {
               <div className="divide-y divide-slate-50">
                 {(sample.sample_tests ?? []).map((st: any) => {
                   const statusCfg = RESULT_STATUS_LABELS[st.status] ?? RESULT_STATUS_LABELS.pending
-                  // qualifier "ND" means not detected
-                  const displayValue = st.qualifier === 'ND' ? 'ND' : st.result
+                  const result = Array.isArray(st.results) ? st.results[0] : st.results
+                  const displayValue = result?.value
                   const hasResult = displayValue !== null && displayValue !== undefined && displayValue !== ''
                   return (
                     <div key={st.id} className="flex items-center justify-between px-5 py-3">
@@ -123,8 +124,8 @@ export default async function ClientOrderDetailPage({ params }: Props) {
                         {hasResult ? (
                           <div>
                             <span className="text-sm font-bold text-slate-900">{displayValue}</span>
-                            {st.qualifier !== 'ND' && st.unit && (
-                              <span className="text-xs text-slate-500 ml-1">{st.unit}</span>
+                            {result?.unit && (
+                              <span className="text-xs text-slate-500 ml-1">{result.unit}</span>
                             )}
                             <p className={`text-xs ${statusCfg.color} mt-0.5`}>{statusCfg.label}</p>
                           </div>

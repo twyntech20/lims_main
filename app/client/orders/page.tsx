@@ -16,11 +16,12 @@ export default async function ClientOrdersPage() {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
 
-  const { data: client } = await supabase
-    .from('clients')
-    .select('id')
-    .eq('profile_id', user!.id)
-    .single()
+  const { data: profile } = await supabase
+    .from('profiles').select('company_name').eq('id', user!.id).single()
+
+  const { data: client } = profile?.company_name
+    ? await supabase.from('clients').select('id').ilike('client_name', profile.company_name).single()
+    : { data: null }
 
   const { data: orders } = await supabase
     .from('orders')

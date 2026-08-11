@@ -3,19 +3,14 @@ import ClientNewOrderForm from '@/components/orders/ClientNewOrderForm'
 
 export default async function ClientNewOrderPage() {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
 
-  const [{ data: client }, { data: tests }] = await Promise.all([
-    supabase.from('clients').select('id, company_name').eq('profile_id', user!.id).single(),
-    supabase.from('tests').select('id, name, code, category').eq('is_active', true).order('category').order('name'),
-  ])
+  const { data: tests } = await supabase
+    .from('tests').select('id, name, code, category').eq('is_active', true).order('category').order('name')
 
-  const { data: projects } = await supabase
-    .from('projects')
-    .select('id, name')
-    .eq('client_id', client?.id ?? '')
-    .eq('is_active', true)
-    .order('name')
+  // Projects are not linked to clients in the current schema — show all of them.
+  const { data: rawProjects } = await supabase
+    .from('projects').select('id, project_name').order('project_name')
+  const projects = (rawProjects ?? []).map(p => ({ id: p.id, name: p.project_name }))
 
   return (
     <div className="p-6 max-w-4xl mx-auto">

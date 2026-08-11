@@ -8,7 +8,7 @@ export default async function AnalystDashboard() {
 
   const [myOrders, pendingSamples] = await Promise.all([
     supabase.from('orders')
-      .select('id, order_number, status, priority, date_due, clients(company_name)')
+      .select('id, order_number, status, priority, date_due, clients(client_name)')
       .eq('assigned_analyst_id', user!.id)
       .not('status', 'in', '("completed","cancelled")')
       .order('date_due', { ascending: true })
@@ -84,7 +84,7 @@ export default async function AnalystDashboard() {
               {orders.map((order: any) => (
                 <tr key={order.id} className="hover:bg-slate-50 transition-colors">
                   <td className="px-6 py-3.5 font-medium text-blue-600">{order.order_number}</td>
-                  <td className="px-6 py-3.5 text-slate-700">{order.clients?.company_name ?? '—'}</td>
+                  <td className="px-6 py-3.5 text-slate-700">{order.clients?.client_name ?? '—'}</td>
                   <td className="px-6 py-3.5">
                     <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${PRIORITY_COLORS[order.priority]}`}>
                       {PRIORITY_LABELS[order.priority] ?? order.priority}
