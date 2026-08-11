@@ -61,7 +61,7 @@ const PRIORITY_LABEL: Record<string, string> = {
   same_day:     'STAT',
 }
 
-const INPUT = 'w-full bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500'
+const INPUT = 'w-full bg-white border border-slate-300 rounded-lg px-2 py-1.5 text-sm placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500'
 
 function ResultRow({ st }: { st: SampleTest }) {
   const [pending, startTransition] = useTransition()
