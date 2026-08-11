@@ -70,14 +70,23 @@ export async function enterResultsBatch(
   revalidatePath('/admin/review-queue')
 }
 
+async function assertCanReview(supabase: Awaited<ReturnType<typeof createClient>>, userId: string) {
+  const { data: profile } = await supabase.from('profiles').select('role, can_review').eq('id', userId).single()
+  const canReview = profile?.role === 'admin' || profile?.role === 'manager' || profile?.can_review === true
+  if (!canReview) throw new Error('You are not authorized to review or approve results')
+}
+
 export async function submitSampleForReview(sampleTestId: string) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) throw new Error('Not authenticated')
 
+  // Submission just moves the item into the review queue — the actual
+  // reviewer's identity is captured at approval time (see approveSampleTest),
+  // not here, so "reviewed_by" always reflects who really reviewed it.
   const { error } = await supabase
     .from('sample_tests')
-    .update({ status: 'reviewed', reviewed_by: user.id, reviewed_at: new Date().toISOString() })
+    .update({ status: 'reviewed' })
     .eq('id', sampleTestId)
     .eq('status', 'entered')   // must be entered before reviewing
 
@@ -91,9 +100,24 @@ export async function approveSampleTest(sampleTestId: string) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) throw new Error('Not authenticated')
 
+  await assertCanReview(supabase, user.id)
+
+  // Segregation of duties: whoever entered the result cannot also approve it.
+  const { data: st } = await supabase.from('sample_tests').select('entered_by').eq('id', sampleTestId).single()
+  if (st?.entered_by && st.entered_by === user.id) {
+    throw new Error('You cannot approve a result you entered yourself — ask another reviewer')
+  }
+
+  const now = new Date().toISOString()
   const { error } = await supabase
     .from('sample_tests')
-    .update({ status: 'approved', approved_by: user.id, approved_at: new Date().toISOString() })
+    .update({
+      status:       'approved',
+      reviewed_by:  user.id,
+      reviewed_at:  now,
+      approved_by:  user.id,
+      approved_at:  now,
+    })
     .eq('id', sampleTestId)
     .eq('status', 'reviewed')
 
@@ -106,6 +130,8 @@ export async function rejectToAnalyst(sampleTestId: string, note: string) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) throw new Error('Not authenticated')
+
+  await assertCanReview(supabase, user.id)
 
   const { error } = await supabase
     .from('sample_tests')
