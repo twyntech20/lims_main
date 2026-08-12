@@ -38,11 +38,13 @@ const ADMIN_NAV: NavItem[] = [
   { label: 'System Logs',  href: '/admin/system-logs',    icon: ScrollText },
 ]
 
+// No separate "Results" route — approved results live in the Work Queue's
+// own Approved tab (app/analyst/work-queue/page.tsx) rather than a
+// duplicate page, so there's nothing else to link to here.
 const ANALYST_NAV: NavItem[] = [
   { label: 'Dashboard',    href: '/analyst/dashboard',    icon: LayoutDashboard },
   { label: 'Work Queue',   href: '/analyst/work-queue',   icon: Inbox },
   { label: 'Review Queue', href: '/analyst/review-queue', icon: ClipboardCheck },
-  { label: 'Results',      href: '/analyst/results',      icon: BarChart3 },
 ]
 
 const CLIENT_NAV: NavItem[] = [

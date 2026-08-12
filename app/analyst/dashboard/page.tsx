@@ -6,28 +6,34 @@ export default async function AnalystDashboard() {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
 
-  const [myOrders, pendingSamples] = await Promise.all([
-    supabase.from('orders')
-      .select('id, order_number, status, priority, date_due, clients(client_name)')
-      .eq('assigned_analyst_id', user!.id)
-      .not('status', 'in', '("completed","cancelled")')
-      .order('date_due', { ascending: true })
-      .limit(10),
-    supabase.from('samples')
-      .select('id, orders!inner(assigned_analyst_id)', { count: 'exact', head: true })
-      .eq('status', 'pending')
-      .eq('orders.assigned_analyst_id', user!.id),
-  ])
+  const { data: myOrdersData } = await supabase.from('orders')
+    .select('id, order_number, status, priority, date_due, clients(client_name)')
+    .eq('assigned_analyst_id', user!.id)
+    .not('status', 'in', '("completed","cancelled")')
+    .order('date_due', { ascending: true })
+    .limit(10)
 
-  const orders = myOrders.data ?? []
+  const orders = myOrdersData ?? []
   const inProgressCount = orders.filter(o => o.status === 'in_progress').length
   const reviewCount = orders.filter(o => o.status === 'review').length
+
+  // Scoped with a plain .in() on this analyst's own order ids rather than an
+  // embedded-resource dot-filter (`.eq('orders.assigned_analyst_id', ...)`
+  // combined with count/head) — that combination silently ignored the filter
+  // and returned the *global* pending-sample count instead of this analyst's.
+  const myOrderIds = orders.map(o => o.id)
+  const { count: pendingSamplesCount } = myOrderIds.length > 0
+    ? await supabase.from('samples')
+        .select('id', { count: 'exact', head: true })
+        .eq('status', 'pending')
+        .in('order_id', myOrderIds)
+    : { count: 0 }
 
   const statCards = [
     { label: 'Assigned to Me', value: orders.length, icon: ClipboardList, color: 'text-blue-600 bg-blue-50' },
     { label: 'In Progress', value: inProgressCount, icon: Beaker, color: 'text-yellow-600 bg-yellow-50' },
     { label: 'In Review', value: reviewCount, icon: Clock, color: 'text-purple-600 bg-purple-50' },
-    { label: 'Pending Samples', value: pendingSamples.count ?? 0, icon: CheckSquare, color: 'text-emerald-600 bg-emerald-50' },
+    { label: 'Pending Samples', value: pendingSamplesCount ?? 0, icon: CheckSquare, color: 'text-emerald-600 bg-emerald-50' },
   ]
 
   const PRIORITY_LABELS: Record<string, string> = {
