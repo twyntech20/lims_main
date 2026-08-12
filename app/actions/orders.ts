@@ -215,6 +215,59 @@ export async function assignAnalyst(orderId: string, analystId: string) {
   revalidatePath(`/admin/orders/${orderId}`)
 }
 
+export async function submitToClient(orderId: string) {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) throw new Error('Not authenticated')
+
+  const { data: order } = await supabase
+    .from('orders')
+    .select('id, order_number, status, assigned_analyst_id')
+    .eq('id', orderId)
+    .single()
+  if (!order) throw new Error('Order not found')
+
+  const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).single()
+  const isOwner = order.assigned_analyst_id === user.id
+  const isStaffAdmin = profile?.role === 'admin' || profile?.role === 'manager'
+  if (!isOwner && !isStaffAdmin) {
+    throw new Error('Only the assigned analyst (or an admin) can submit this order to the client')
+  }
+
+  if (order.status === 'completed') throw new Error('This order has already been submitted to the client')
+
+  // Every result must be reviewed and approved before it can go out —
+  // this is the "Ready for Client" gate, computed rather than stored.
+  const { data: sampleTests } = await supabase
+    .from('sample_tests')
+    .select('id, status, samples!inner(order_id)')
+    .eq('samples.order_id', orderId)
+
+  if (!sampleTests || sampleTests.length === 0) throw new Error('This order has no tests to submit')
+  const notApproved = sampleTests.filter((st) => st.status !== 'approved')
+  if (notApproved.length > 0) {
+    throw new Error(`${notApproved.length} result(s) are not yet approved — cannot submit to client`)
+  }
+
+  const { error } = await supabase
+    .from('orders')
+    .update({ status: 'completed', date_completed: new Date().toISOString() })
+    .eq('id', orderId)
+  if (error) throw new Error(error.message)
+
+  await supabase.from('audit_logs').insert({
+    user_id: user.id,
+    action: 'submitted_to_client',
+    table_name: 'orders',
+    record_id: orderId,
+    new_values: { order_number: order.order_number, status: 'completed' },
+  })
+
+  revalidatePath(`/admin/orders/${orderId}`)
+  revalidatePath(`/analyst/orders/${orderId}`)
+  revalidatePath('/admin/reports')
+}
+
 export async function addSampleToOrder(formData: FormData) {
   const supabase    = await createClient()
   const orderId     = (formData.get('order_id')            as string ?? '').trim()

@@ -213,7 +213,7 @@ type GroupedBySample = {
   tests: SampleTest[]
 }
 
-export default function WorkQueueTable({ rows }: { rows: SampleTest[] }) {
+export default function WorkQueueTable({ rows, orderBasePath = '/admin/orders' }: { rows: SampleTest[]; orderBasePath?: string }) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
 
   function toggle(key: string) {
@@ -286,7 +286,7 @@ export default function WorkQueueTable({ rows }: { rows: SampleTest[] }) {
                     {order?.clients?.client_name && <span>{order.clients.client_name}</span>}
                     {order?.customer_name && <span>· {order.customer_name}</span>}
                     {order?.id && (
-                      <a href={`/admin/orders/${order.id}`} onClick={e => e.stopPropagation()}
+                      <a href={`${orderBasePath}/${order.id}`} onClick={e => e.stopPropagation()}
                         className="text-blue-500 hover:underline">View order</a>
                     )}
                     {order?.date_due && <span>Due: {new Date(order.date_due).toLocaleDateString()}</span>}

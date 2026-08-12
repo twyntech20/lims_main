@@ -49,7 +49,6 @@ export default async function AnalystWorkQueuePage({ searchParams }: Props) {
       ),
       entered_by_profile:profiles!sample_tests_entered_by_fkey ( first_name, last_name, email )
     `)
-    .not('status', 'eq', 'approved')
     .order('entered_at', { ascending: true, nullsFirst: true })
 
   if (status)   query = query.eq('status', status)
@@ -58,18 +57,24 @@ export default async function AnalystWorkQueuePage({ searchParams }: Props) {
   const { data: sampleTests } = await query
 
   // Filter: show only tests for orders assigned to this analyst, OR tests entered by this analyst
+  // (approved results stay visible here too — Analyst 1 needs to see the outcome of
+  // their own submissions once Analyst 2 has reviewed them, not just the open work).
   const filtered = (sampleTests ?? []).filter(st => {
     const order = (st.samples as any)?.orders
     return order?.assigned_analyst_id === user.id || (st as any).entered_by_profile?.id === user.id
   })
 
-  const pendingCount = filtered.filter(s => s.status === 'pending').length
-  const enteredCount = filtered.filter(s => s.status === 'entered').length
+  const pendingCount  = filtered.filter(s => s.status === 'pending').length
+  const enteredCount  = filtered.filter(s => s.status === 'entered').length
+  const reviewedCount = filtered.filter(s => s.status === 'reviewed').length
+  const approvedCount = filtered.filter(s => s.status === 'approved').length
 
   const tabs = [
-    { key: '',        label: 'All',     count: filtered.length },
-    { key: 'pending', label: 'Pending', count: pendingCount },
-    { key: 'entered', label: 'Entered', count: enteredCount },
+    { key: '',         label: 'All',      count: filtered.length },
+    { key: 'pending',  label: 'Pending',  count: pendingCount },
+    { key: 'entered',  label: 'Entered',  count: enteredCount },
+    { key: 'reviewed', label: 'In Review', count: reviewedCount },
+    { key: 'approved', label: 'Approved', count: approvedCount },
   ]
 
   return (
@@ -128,7 +133,7 @@ export default async function AnalystWorkQueuePage({ searchParams }: Props) {
         </form>
       </div>
 
-      <WorkQueueTable rows={filtered as any} />
+      <WorkQueueTable rows={filtered as any} orderBasePath="/analyst/orders" />
     </div>
   )
 }

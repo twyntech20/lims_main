@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import toast from 'react-hot-toast'
+import toast, { Toaster } from 'react-hot-toast'
 import { createOrder } from '@/app/actions/orders'
 import { Plus, Trash2, ChevronDown, ChevronUp } from 'lucide-react'
 
@@ -254,6 +254,7 @@ export default function CocOrderForm({ clients, tests }: Props) {
 
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
+      <Toaster position="top-center" />
       {/* ── 1. Client & Project Information ── */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-4">
         <h2 className="font-semibold text-slate-900">Client &amp; Project Information</h2>

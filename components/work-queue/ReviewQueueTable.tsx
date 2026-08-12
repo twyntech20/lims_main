@@ -166,7 +166,7 @@ type Group = {
   tests: SampleTest[]
 }
 
-export default function ReviewQueueTable({ rows }: { rows: SampleTest[] }) {
+export default function ReviewQueueTable({ rows, orderBasePath = '/admin/orders' }: { rows: SampleTest[]; orderBasePath?: string }) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
 
   function toggle(key: string) {
@@ -227,7 +227,7 @@ export default function ReviewQueueTable({ rows }: { rows: SampleTest[] }) {
                   <div className="flex items-center gap-4 mt-1 text-xs text-slate-400">
                     {(order as any)?.clients?.client_name && <span>{(order as any).clients.client_name}</span>}
                     {(order as any)?.id && (
-                      <a href={`/admin/orders/${(order as any).id}`} onClick={e => e.stopPropagation()}
+                      <a href={`${orderBasePath}/${(order as any).id}`} onClick={e => e.stopPropagation()}
                         className="text-blue-500 hover:underline">View order</a>
                     )}
                   </div>

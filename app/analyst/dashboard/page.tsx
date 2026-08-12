@@ -14,8 +14,9 @@ export default async function AnalystDashboard() {
       .order('date_due', { ascending: true })
       .limit(10),
     supabase.from('samples')
-      .select('id', { count: 'exact', head: true })
-      .eq('status', 'pending'),
+      .select('id, orders!inner(assigned_analyst_id)', { count: 'exact', head: true })
+      .eq('status', 'pending')
+      .eq('orders.assigned_analyst_id', user!.id),
   ])
 
   const orders = myOrders.data ?? []

@@ -62,13 +62,16 @@ interface Props {
   role: UserRole
   userName: string
   unreadCount?: number
+  canReview?: boolean
 }
 
-export default function Sidebar({ role, userName, unreadCount = 0 }: Props) {
+export default function Sidebar({ role, userName, unreadCount = 0, canReview = false }: Props) {
   const pathname = usePathname()
   const router = useRouter()
   const [collapsed, setCollapsed] = useState(false)
-  const nav = NAV_BY_ROLE[role] ?? []
+  const nav = (NAV_BY_ROLE[role] ?? []).filter(
+    item => !(role === 'analyst' && item.href === '/analyst/review-queue' && !canReview)
+  )
 
   async function handleSignOut() {
     const supabase = createClient()

@@ -1,5 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
-import { notFound } from 'next/navigation'
+import { notFound, redirect } from 'next/navigation'
 import Link from 'next/link'
 import { ArrowLeft } from 'lucide-react'
 import PrintButton from '@/components/reports/PrintButton'
@@ -9,9 +9,11 @@ interface Props {
   params: Promise<{ id: string }>
 }
 
-export default async function ReportPage({ params }: Props) {
+export default async function AnalystReportPage({ params }: Props) {
   const { id } = await params
   const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) redirect('/login')
 
   const { data: order } = await supabase
     .from('orders')
@@ -48,6 +50,9 @@ export default async function ReportPage({ params }: Props) {
     .single()
 
   if (!order) notFound()
+  // Analysts may only pull the report for orders they were assigned —
+  // this is a report of their own work, not a general admin lookup.
+  if (order.assigned_analyst_id !== user.id) redirect('/analyst/work-queue')
 
   return (
     <>
@@ -62,10 +67,10 @@ export default async function ReportPage({ params }: Props) {
       <div className="p-6 max-w-4xl mx-auto print-page">
         <div className="flex items-center justify-between mb-6 print:hidden">
           <Link
-            href="/admin/reports"
+            href={`/analyst/orders/${order.id}`}
             className="flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-700 transition"
           >
-            <ArrowLeft className="w-3.5 h-3.5" /> Back to Reports
+            <ArrowLeft className="w-3.5 h-3.5" /> Back to Order
           </Link>
           <PrintButton orderId={order.id} />
         </div>

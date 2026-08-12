@@ -10,7 +10,7 @@ export default async function AnalystLayout({ children }: { children: React.Reac
 
   const { data: profile } = await supabase
     .from('profiles')
-    .select('role, first_name, last_name')
+    .select('role, first_name, last_name, can_review')
     .eq('id', user.id)
     .single()
 
@@ -28,6 +28,7 @@ export default async function AnalystLayout({ children }: { children: React.Reac
         role="analyst"
         userName={[(profile as any).first_name, (profile as any).last_name].filter(Boolean).join(' ') || user.email || ''}
         unreadCount={count ?? 0}
+        canReview={(profile as any).can_review === true}
       />
       <main className="flex-1 overflow-y-auto">
         {children}
