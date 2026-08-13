@@ -1,7 +1,7 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 
-const PUBLIC_PATHS = ['/login', '/client-login', '/auth/callback', '/auth/reset-password', '/force-password-change']
+const PUBLIC_PATHS = ['/login', '/client-login', '/auth/callback', '/auth/reset-password', '/update-password', '/force-password-change']
 
 const ROLE_HOME: Record<string, string> = {
   admin: '/admin/dashboard',

@@ -15,9 +15,12 @@ export default function ResetPasswordPage() {
     e.preventDefault()
     setLoading(true)
     const supabase = createClient()
-    const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${window.location.origin}/auth/callback?next=/update-password`,
-    })
+    const redirectTo = `${window.location.origin}/auth/callback?next=/update-password`
+    // TEMPORARY — diagnosing a mismatch between this value and what Supabase
+    // actually receives. Remove once confirmed.
+    console.log('WINDOW ORIGIN:', window.location.origin)
+    console.log('PASSWORD RESET redirectTo:', redirectTo)
+    const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo })
     setLoading(false)
     if (error) { toast.error(error.message); return }
     setSent(true)
