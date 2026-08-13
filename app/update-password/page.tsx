@@ -1,7 +1,8 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useEffect, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
+import { createClient } from '@/lib/supabase/client'
 import { changePassword } from '@/app/actions/profile'
 import { FlaskConical, Loader2 } from 'lucide-react'
 
@@ -10,6 +11,30 @@ export default function UpdatePasswordPage() {
   const [pending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
   const [done, setDone] = useState(false)
+  const [checkingSession, setCheckingSession] = useState(true)
+  const [hasSession, setHasSession] = useState(false)
+
+  useEffect(() => {
+    const supabase = createClient()
+    // The recovery link lands here with the session encoded in the URL's
+    // hash fragment (Supabase's hosted /verify redirect), not a query
+    // param — the server-side callback route can never see it. The
+    // browser client's default detectSessionInUrl behavior consumes that
+    // fragment as soon as it's constructed; we just need to wait for it
+    // before letting the form submit, since changePassword() (a server
+    // action) needs the resulting session cookie to already be set.
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'PASSWORD_RECOVERY' || session) {
+        setHasSession(true)
+        setCheckingSession(false)
+      }
+    })
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session) setHasSession(true)
+      setCheckingSession(false)
+    })
+    return () => subscription.unsubscribe()
+  }, [])
 
   function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
@@ -37,7 +62,17 @@ export default function UpdatePasswordPage() {
           <h1 className="text-3xl font-bold text-white">Set New Password</h1>
         </div>
         <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl p-8">
-          {done ? (
+          {checkingSession ? (
+            <div className="text-center py-4">
+              <Loader2 className="w-6 h-6 text-slate-400 animate-spin mx-auto mb-3" />
+              <p className="text-slate-400 text-sm">Verifying your reset link…</p>
+            </div>
+          ) : !hasSession ? (
+            <div className="text-center py-4">
+              <p className="text-red-300 font-medium mb-2">This reset link is invalid or has expired.</p>
+              <p className="text-slate-400 text-sm">Request a new one from the reset password page.</p>
+            </div>
+          ) : done ? (
             <div className="text-center">
               <div className="text-green-400 text-5xl mb-4">✓</div>
               <p className="text-white font-medium">Password updated — redirecting…</p>
