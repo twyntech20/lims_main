@@ -55,7 +55,10 @@ export default async function AnalystReviewQueuePage({ searchParams }: Props) {
       entered_by_profile:profiles!sample_tests_entered_by_fkey ( first_name, last_name, email ),
       reviewed_by_profile:profiles!sample_tests_reviewed_by_fkey ( first_name, last_name, email )
     `)
-    .in('status', ['entered', 'reviewed'])
+    // Only results explicitly assigned to this reviewer — "entered" items
+    // haven't been assigned by Analyst 1 yet, so they don't belong here.
+    .eq('status', 'reviewed')
+    .eq('assigned_reviewer_id', user.id)
     .order('entered_at', { ascending: true })
 
   if (category) query = query.eq('tests.category', category)
@@ -70,9 +73,6 @@ export default async function AnalystReviewQueuePage({ searchParams }: Props) {
     return true
   })
 
-  const enteredCount  = filtered.filter(s => s.status === 'entered').length
-  const reviewedCount = filtered.filter(s => s.status === 'reviewed').length
-
   return (
     <div className="p-6 max-w-7xl mx-auto">
       <div className="mb-6">
@@ -81,7 +81,7 @@ export default async function AnalystReviewQueuePage({ searchParams }: Props) {
           Review Queue
         </h1>
         <p className="text-slate-500 text-sm mt-1">
-          {enteredCount} awaiting review · {reviewedCount} reviewed
+          {filtered.length} result{filtered.length !== 1 ? 's' : ''} assigned to you for review
         </p>
       </div>
 

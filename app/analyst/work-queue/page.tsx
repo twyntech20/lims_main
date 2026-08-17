@@ -12,6 +12,16 @@ export default async function AnalystWorkQueuePage({ searchParams }: Props) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
+  // Reviewers available to assign to — matches the authorization check in
+  // submitSampleForReview (analyst with can_review, or admin/manager).
+  const { data: reviewerProfiles } = await supabase
+    .from('profiles')
+    .select('id, first_name, last_name, email')
+    .or('can_review.eq.true,role.in.(admin,manager)')
+    .eq('is_active', true)
+    .neq('id', user.id)
+    .order('first_name')
+
   // Analyst sees: tests pending entry, or tests they entered that haven't been approved yet
   let query = supabase
     .from('sample_tests')
@@ -133,7 +143,7 @@ export default async function AnalystWorkQueuePage({ searchParams }: Props) {
         </form>
       </div>
 
-      <WorkQueueTable rows={filtered as any} orderBasePath="/analyst/orders" />
+      <WorkQueueTable rows={filtered as any} orderBasePath="/analyst/orders" reviewers={reviewerProfiles ?? []} />
     </div>
   )
 }

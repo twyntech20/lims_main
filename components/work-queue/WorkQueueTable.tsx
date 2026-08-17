@@ -40,6 +40,15 @@ type SampleTest = {
   entered_by_profile: { first_name: string | null; last_name: string | null; email: string } | null
 }
 
+export type Reviewer = { id: string; first_name: string | null; last_name: string | null; email: string }
+
+const STATUS_LABEL: Record<string, string> = {
+  pending:  'Pending',
+  entered:  'Entered',
+  reviewed: 'Pending Review',
+  approved: 'Approved',
+}
+
 const STATUS_BADGE: Record<string, string> = {
   pending:  'bg-slate-100 text-slate-600',
   entered:  'bg-yellow-50 text-yellow-700 border border-yellow-200',
@@ -63,7 +72,7 @@ const PRIORITY_LABEL: Record<string, string> = {
 
 const INPUT = 'w-full bg-white border border-slate-300 rounded-lg px-2 py-1.5 text-sm placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500'
 
-function ResultRow({ st }: { st: SampleTest }) {
+function ResultRow({ st, reviewers }: { st: SampleTest; reviewers: Reviewer[] }) {
   const [pending, startTransition] = useTransition()
   const [result, setResult]               = useState(st.result ?? '')
   const [unit, setUnit]                   = useState(st.unit ?? st.tests?.unit ?? '')
@@ -73,6 +82,7 @@ function ResultRow({ st }: { st: SampleTest }) {
   const [notes, setNotes]                 = useState(st.analyst_notes ?? '')
   const [dirty, setDirty]                 = useState(false)
   const [reviewing, startReview]          = useTransition()
+  const [reviewerId, setReviewerId]       = useState('')
 
   function markDirty() { setDirty(true) }
 
@@ -95,13 +105,14 @@ function ResultRow({ st }: { st: SampleTest }) {
     })
   }
 
-  function handleReview() {
+  function handleAssignReview() {
+    if (!reviewerId) { toast.error('Select a reviewer first'); return }
     startReview(async () => {
       try {
-        await submitSampleForReview(st.id)
-        toast.success('Submitted for review')
+        await submitSampleForReview(st.id, reviewerId)
+        toast.success('Assigned for review')
       } catch (err: any) {
-        toast.error(err.message ?? 'Failed to submit')
+        toast.error(err.message ?? 'Failed to assign review')
       }
     })
   }
@@ -174,16 +185,16 @@ function ResultRow({ st }: { st: SampleTest }) {
       </td>
 
       {/* Status */}
-      <td className="px-3 py-3 w-24">
+      <td className="px-3 py-3 w-28">
         <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATUS_BADGE[st.status] ?? 'bg-slate-100 text-slate-600'}`}>
-          {st.status}
+          {STATUS_LABEL[st.status] ?? st.status}
         </span>
       </td>
 
       {/* Actions */}
-      <td className="px-3 py-3 w-32">
+      <td className="px-3 py-3 w-48">
         {isReadonly
-          ? <span className="text-xs text-slate-400 flex items-center gap-1"><CheckCircle2 className="w-3 h-3" /> {st.status}</span>
+          ? <span className="text-xs text-slate-400 flex items-center gap-1"><CheckCircle2 className="w-3 h-3" /> {STATUS_LABEL[st.status] ?? st.status}</span>
           : <div className="flex flex-col gap-1.5">
               {dirty && (
                 <button onClick={handleSave} disabled={pending}
@@ -193,11 +204,22 @@ function ResultRow({ st }: { st: SampleTest }) {
                 </button>
               )}
               {st.status === 'entered' && !dirty && (
-                <button onClick={handleReview} disabled={reviewing}
-                  className="flex items-center justify-center gap-1 bg-slate-800 hover:bg-slate-700 disabled:bg-slate-400 text-white text-xs font-medium px-3 py-1.5 rounded-lg transition">
-                  {reviewing ? <Loader2 className="w-3 h-3 animate-spin" /> : <Clock className="w-3 h-3" />}
-                  {reviewing ? '…' : 'Submit'}
-                </button>
+                <div className="flex flex-col gap-1">
+                  <select value={reviewerId} onChange={e => setReviewerId(e.target.value)}
+                    className="text-xs bg-white border border-slate-300 rounded-lg px-1.5 py-1 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <option value="">Reviewer…</option>
+                    {reviewers.map(r => (
+                      <option key={r.id} value={r.id}>
+                        {[r.first_name, r.last_name].filter(Boolean).join(' ') || r.email}
+                      </option>
+                    ))}
+                  </select>
+                  <button onClick={handleAssignReview} disabled={reviewing || !reviewerId}
+                    className="flex items-center justify-center gap-1 bg-slate-800 hover:bg-slate-700 disabled:bg-slate-400 text-white text-xs font-medium px-3 py-1.5 rounded-lg transition">
+                    {reviewing ? <Loader2 className="w-3 h-3 animate-spin" /> : <Clock className="w-3 h-3" />}
+                    {reviewing ? '…' : 'Assign Review'}
+                  </button>
+                </div>
               )}
             </div>
         }
@@ -213,7 +235,7 @@ type GroupedBySample = {
   tests: SampleTest[]
 }
 
-export default function WorkQueueTable({ rows, orderBasePath = '/admin/orders' }: { rows: SampleTest[]; orderBasePath?: string }) {
+export default function WorkQueueTable({ rows, orderBasePath = '/admin/orders', reviewers = [] }: { rows: SampleTest[]; orderBasePath?: string; reviewers?: Reviewer[] }) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
 
   function toggle(key: string) {
@@ -332,7 +354,7 @@ export default function WorkQueueTable({ rows, orderBasePath = '/admin/orders' }
                       </tr>
                     </thead>
                     <tbody>
-                      {tests.map(st => <ResultRow key={st.id} st={st} />)}
+                      {tests.map(st => <ResultRow key={st.id} st={st} reviewers={reviewers} />)}
                     </tbody>
                   </table>
                 </div>

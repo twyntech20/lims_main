@@ -17,6 +17,15 @@ export default async function WorkQueuePage({ searchParams }: Props) {
     .in('role', ['analyst', 'admin', 'supervisor'])
     .order('first_name')
 
+  // Reviewers available to assign to — matches the authorization check in
+  // submitSampleForReview (analyst with can_review, or admin/manager).
+  const { data: reviewerProfiles } = await supabase
+    .from('profiles')
+    .select('id, first_name, last_name, email')
+    .or('can_review.eq.true,role.in.(admin,manager)')
+    .eq('is_active', true)
+    .order('first_name')
+
   // Base query: all sample_tests with their sample + order + test info
   let query = supabase
     .from('sample_tests')
@@ -169,7 +178,7 @@ export default async function WorkQueuePage({ searchParams }: Props) {
       </div>
 
       {/* Main Table */}
-      <WorkQueueTable rows={filtered as any} />
+      <WorkQueueTable rows={filtered as any} reviewers={reviewerProfiles ?? []} />
     </div>
   )
 }

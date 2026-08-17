@@ -76,23 +76,31 @@ async function assertCanReview(supabase: Awaited<ReturnType<typeof createClient>
   if (!canReview) throw new Error('You are not authorized to review or approve results')
 }
 
-export async function submitSampleForReview(sampleTestId: string) {
+export async function submitSampleForReview(sampleTestId: string, reviewerId: string) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) throw new Error('Not authenticated')
+  if (!reviewerId) throw new Error('Select a reviewer to assign this result to')
 
-  // Submission just moves the item into the review queue — the actual
-  // reviewer's identity is captured at approval time (see approveSampleTest),
-  // not here, so "reviewed_by" always reflects who really reviewed it.
+  const { data: reviewer } = await supabase.from('profiles').select('role, can_review').eq('id', reviewerId).single()
+  const reviewerOk = reviewer?.role === 'admin' || reviewer?.role === 'manager' || reviewer?.can_review === true
+  if (!reviewerOk) throw new Error('Selected reviewer is not authorized to review results')
+  if (reviewerId === user.id) throw new Error('You cannot assign a review to yourself')
+
+  // "reviewed_by"/"reviewed_at" still get set at approval time (see
+  // approveSampleTest) so they always reflect who actually reviewed it —
+  // assigned_reviewer_id is who it was handed to, a separate fact.
   const { error } = await supabase
     .from('sample_tests')
-    .update({ status: 'reviewed' })
+    .update({ status: 'reviewed', assigned_reviewer_id: reviewerId })
     .eq('id', sampleTestId)
     .eq('status', 'entered')   // must be entered before reviewing
 
   if (error) throw new Error(error.message)
   revalidatePath('/admin/work-queue')
   revalidatePath('/admin/review-queue')
+  revalidatePath('/analyst/work-queue')
+  revalidatePath('/analyst/review-queue')
 }
 
 export async function approveSampleTest(sampleTestId: string) {
