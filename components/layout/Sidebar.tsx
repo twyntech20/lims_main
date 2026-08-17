@@ -28,6 +28,7 @@ const ADMIN_NAV: NavItem[] = [
   { label: 'Results',      href: '/admin/results',        icon: BarChart3 },
   { label: 'Work Queue',   href: '/admin/work-queue',     icon: Inbox },
   { label: 'Review Queue', href: '/admin/review-queue',   icon: ClipboardCheck },
+  { label: 'Notifications', href: '/admin/notifications', icon: Bell },
   { label: 'Amendments',   href: '/admin/amendments',     icon: GitPullRequestArrow },
   { label: 'Tests',        href: '/admin/tests',          icon: TestTube },
   { label: 'Clients',      href: '/admin/clients',        icon: Briefcase },
@@ -45,6 +46,7 @@ const ANALYST_NAV: NavItem[] = [
   { label: 'Dashboard',    href: '/analyst/dashboard',    icon: LayoutDashboard },
   { label: 'Work Queue',   href: '/analyst/work-queue',   icon: Inbox },
   { label: 'Review Queue', href: '/analyst/review-queue', icon: ClipboardCheck },
+  { label: 'Notifications', href: '/analyst/notifications', icon: Bell },
 ]
 
 const CLIENT_NAV: NavItem[] = [

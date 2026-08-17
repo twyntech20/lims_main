@@ -2,6 +2,8 @@ import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import { ClipboardCheck } from 'lucide-react'
 import ReviewQueueTable from '@/components/work-queue/ReviewQueueTable'
+import { RESULT_QUEUE_SELECT } from '@/lib/queries/result-queue'
+import { isOverdue } from '@/lib/workflow'
 
 interface SearchParams { category?: string; priority?: string }
 interface Props { searchParams: Promise<SearchParams> }
@@ -20,41 +22,7 @@ export default async function AnalystReviewQueuePage({ searchParams }: Props) {
 
   let query = supabase
     .from('sample_tests')
-    .select(`
-      id,
-      status,
-      result,
-      unit,
-      qualifier,
-      mdl,
-      dilution_factor,
-      analyst_notes,
-      entered_at,
-      reviewed_at,
-      samples (
-        id,
-        sample_id,
-        description,
-        matrix_type,
-        collection_date,
-        orders (
-          id,
-          priority,
-          date_due,
-          customer_name,
-          clients ( client_name )
-        )
-      ),
-      tests (
-        id,
-        name,
-        code,
-        category,
-        unit
-      ),
-      entered_by_profile:profiles!sample_tests_entered_by_fkey ( first_name, last_name, email ),
-      reviewed_by_profile:profiles!sample_tests_reviewed_by_fkey ( first_name, last_name, email )
-    `)
+    .select(RESULT_QUEUE_SELECT)
     // Only results explicitly assigned to this reviewer — "entered" items
     // haven't been assigned by Analyst 1 yet, so they don't belong here.
     .eq('status', 'reviewed')
@@ -65,13 +33,10 @@ export default async function AnalystReviewQueuePage({ searchParams }: Props) {
 
   const { data: sampleTests } = await query
 
-  const filtered = (sampleTests ?? []).filter(st => {
-    if (priority) {
-      const order = (st.samples as any)?.orders
-      if (order?.priority !== priority) return false
-    }
-    return true
-  })
+  const filtered = ((sampleTests ?? []) as any[]).filter(st =>
+    !priority || st.samples?.orders?.priority === priority
+  )
+  const overdueCount = filtered.filter(st => isOverdue(st.samples?.orders?.date_due)).length
 
   return (
     <div className="p-6 max-w-7xl mx-auto">
@@ -82,6 +47,7 @@ export default async function AnalystReviewQueuePage({ searchParams }: Props) {
         </h1>
         <p className="text-slate-500 text-sm mt-1">
           {filtered.length} result{filtered.length !== 1 ? 's' : ''} assigned to you for review
+          {overdueCount > 0 && <span className="text-red-600 font-medium"> · {overdueCount} past the order due date</span>}
         </p>
       </div>
 

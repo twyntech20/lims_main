@@ -2,9 +2,22 @@ import { createClient } from '@/lib/supabase/server'
 import Link from 'next/link'
 import { ClipboardList, FlaskConical } from 'lucide-react'
 import WorkQueueTable from '@/components/work-queue/WorkQueueTable'
+import { RESULT_QUEUE_SELECT, REVIEWER_SELECT } from '@/lib/queries/result-queue'
+import { workflowState, type WorkflowState } from '@/lib/workflow'
 
 interface SearchParams { status?: string; analyst?: string; category?: string; priority?: string }
 interface Props { searchParams: Promise<SearchParams> }
+
+// Queue tabs are workflow states, not raw statuses — "returned for changes"
+// and "released" are the two the enum cannot express on its own.
+const TAB_STATE: Record<string, WorkflowState> = {
+  pending:  'awaiting_entry',
+  entered:  'awaiting_review',
+  returned: 'returned',
+  reviewed: 'in_review',
+  approved: 'approved',
+  released: 'released',
+}
 
 export default async function WorkQueuePage({ searchParams }: Props) {
   const { status, analyst, category, priority } = await searchParams
@@ -21,80 +34,45 @@ export default async function WorkQueuePage({ searchParams }: Props) {
   // submitSampleForReview (analyst with can_review, or admin/manager).
   const { data: reviewerProfiles } = await supabase
     .from('profiles')
-    .select('id, first_name, last_name, email')
+    .select(REVIEWER_SELECT)
     .or('can_review.eq.true,role.in.(admin,manager)')
     .eq('is_active', true)
     .order('first_name')
 
-  // Base query: all sample_tests with their sample + order + test info
   let query = supabase
     .from('sample_tests')
-    .select(`
-      id,
-      status,
-      result,
-      unit,
-      qualifier,
-      mdl,
-      dilution_factor,
-      analyst_notes,
-      entered_at,
-      samples (
-        id,
-        sample_id,
-        description,
-        matrix_type,
-        collection_date,
-        orders (
-          id,
-          priority,
-          date_due,
-          customer_name,
-          clients ( client_name )
-        )
-      ),
-      tests (
-        id,
-        name,
-        code,
-        category,
-        unit
-      ),
-      entered_by_profile:profiles!sample_tests_entered_by_fkey ( first_name, last_name, email )
-    `)
+    .select(RESULT_QUEUE_SELECT)
     .order('entered_at', { ascending: true, nullsFirst: true })
 
-  if (status)   query = query.eq('status', status)
   if (category) query = query.eq('tests.category', category)
 
   const { data: sampleTests } = await query
+  const allData = (sampleTests ?? []) as any[]
 
-  // Filter by analyst after fetch (since it's a FK filter on entered_by)
-  const filtered = sampleTests?.filter(st => {
-    if (analyst && (st as any).entered_by_profile?.email !== analyst) return false
-    if (priority) {
-      const order = (st.samples as any)?.orders
-      if (order?.priority !== priority) return false
-    }
+  const stateOf = (st: any): WorkflowState => workflowState({
+    status: st.status,
+    returned_at: st.returned_at,
+    assigned_reviewer_id: st.assigned_reviewer_id,
+    order_released_at: st.samples?.orders?.released_at,
+  })
+
+  const filtered = allData.filter(st => {
+    if (status && stateOf(st) !== TAB_STATE[status]) return false
+    if (analyst && st.entered_by_profile?.email !== analyst) return false
+    if (priority && st.samples?.orders?.priority !== priority) return false
     return true
-  }) ?? []
+  })
 
-  // Status counts for tabs
-  const allData = sampleTests ?? []
-  const counts = {
-    all:      allData.length,
-    pending:  allData.filter(s => s.status === 'pending').length,
-    entered:  allData.filter(s => s.status === 'entered').length,
-    reviewed: allData.filter(s => s.status === 'reviewed').length,
-    approved: allData.filter(s => s.status === 'approved').length,
-  }
+  const countState = (s: WorkflowState) => allData.filter(st => stateOf(st) === s).length
 
   const tabs = [
-    { key: '',         label: 'All',      count: counts.all },
-    { key: 'pending',  label: 'Pending',  count: counts.pending },
-    { key: 'entered',  label: 'Entered',  count: counts.entered },
-    { key: 'reviewed', label: 'Reviewed', count: counts.reviewed },
-    { key: 'approved', label: 'Approved', count: counts.approved },
+    { key: '',         label: 'All',              count: allData.length },
+    { key: 'pending',  label: 'Awaiting entry',   count: countState('awaiting_entry') },
+    { key: 'returned', label: 'Returned',         count: countState('returned') },
+    { key: 'entered',  label: 'Awaiting review',  count: countState('awaiting_review') },
+    { key: 'reviewed', label: 'In review',        count: countState('in_review') },
+    { key: 'approved', label: 'Ready to release', count: countState('approved') },
+    { key: 'released', label: 'Released',         count: countState('released') },
   ]
 
   return (
@@ -107,7 +85,9 @@ export default async function WorkQueuePage({ searchParams }: Props) {
             Work Queue
           </h1>
           <p className="text-slate-500 text-sm mt-1">
-            {counts.pending} pending · {counts.entered} entered · {counts.reviewed} in review
+            {countState('awaiting_entry')} to enter · {countState('returned')} returned ·{' '}
+            {countState('awaiting_review')} to assign · {countState('in_review')} in review ·{' '}
+            {countState('approved')} ready to release
           </p>
         </div>
         <Link href="/admin/review-queue"
@@ -117,7 +97,7 @@ export default async function WorkQueuePage({ searchParams }: Props) {
       </div>
 
       {/* Status Tabs */}
-      <div className="flex gap-1 mb-4 bg-slate-100 rounded-xl p-1 w-fit">
+      <div className="flex gap-1 mb-4 bg-slate-100 rounded-xl p-1 w-fit flex-wrap">
         {tabs.map(tab => {
           const active = (status ?? '') === tab.key
           return (

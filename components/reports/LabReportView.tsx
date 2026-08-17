@@ -42,6 +42,8 @@ export interface LabReportOrder {
   customer_name: string | null
   date_received: string | null
   date_completed: string | null
+  released_at: string | null
+  released_by_profile: ProfileRef | null
   profiles: { first_name: string | null; last_name: string | null; email: string } | null
   clients: { client_name: string; email: string | null; phone: string | null; address: string | null } | null
   samples: SampleRow[]
@@ -162,6 +164,19 @@ export default function LabReportView({ order }: { order: LabReportOrder }) {
             <p className="text-sm font-medium text-slate-800">{reviewerName}</p>
             {latestApproval?.approved_at && (
               <p className="text-xs text-slate-400">{fmtDate(latestApproval.approved_at)}</p>
+            )}
+          </div>
+          {/* Who authorised the release of this report, and when. Absent
+              until the order is actually released — a preview says so. */}
+          <div>
+            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1">Released By</p>
+            {order.released_at ? (
+              <>
+                <p className="text-sm font-medium text-slate-800">{profileName(order.released_by_profile)}</p>
+                <p className="text-xs text-slate-400">{fmtDate(order.released_at)}</p>
+              </>
+            ) : (
+              <p className="text-sm font-medium text-amber-600">Not yet released — preview</p>
             )}
           </div>
         </div>

@@ -20,6 +20,8 @@ export default async function ReportPage({ params }: Props) {
       order_number,
       customer_name,
       date_completed,
+      released_at,
+      released_by_profile:profiles!orders_released_by_fkey ( first_name, last_name, email ),
       date_received,
       assigned_analyst_id,
       profiles!orders_assigned_analyst_id_fkey ( first_name, last_name, email ),

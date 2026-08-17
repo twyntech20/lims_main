@@ -2,6 +2,7 @@ import { createClient } from '@/lib/supabase/server'
 import Link from 'next/link'
 import { Plus, Users, FileBarChart, Settings, ClipboardList, FlaskConical, TestTube, BarChart3 } from 'lucide-react'
 import DashboardCharts from '@/components/dashboard/DashboardCharts'
+import WorkflowIndicators from '@/components/dashboard/WorkflowIndicators'
 
 interface SearchParams { period?: string }
 interface Props { searchParams: Promise<SearchParams> }
@@ -36,12 +37,19 @@ export default async function AdminDashboard({ searchParams }: Props) {
   }
   const sinceISO = since.toISOString()
 
-  const [ordersRes, samplesRes, testsRes, resultsRes] = await Promise.all([
+  const [ordersRes, samplesRes, testsRes, workflowRes] = await Promise.all([
     supabase.from('orders').select('id, status, created_at').gte('created_at', sinceISO),
     supabase.from('samples').select('id').gte('created_at', sinceISO),
     supabase.from('tests').select('id').eq('is_active', true),
-    supabase.from('results').select('id').gte('created_at', sinceISO),
+    // Workflow indicators are counted over every open result, not just the
+    // selected period — a result stuck in review last month is still stuck.
+    supabase.from('sample_tests').select(`
+      status, returned_at, assigned_reviewer_id, entered_at,
+      samples ( orders ( date_due, released_at ) )
+    `),
   ])
+
+  const workflowRows = (workflowRes.data ?? []) as any[]
 
   const orders = (ordersRes.data ?? []) as any[]
 
@@ -76,7 +84,9 @@ export default async function AdminDashboard({ searchParams }: Props) {
     { label: 'Orders',  value: orders.length,                       icon: ClipboardList, color: 'text-blue-500' },
     { label: 'Samples', value: (samplesRes.data ?? []).length,       icon: FlaskConical,  color: 'text-green-500' },
     { label: 'Tests',   value: (testsRes.data ?? []).length,         icon: TestTube,      color: 'text-yellow-500' },
-    { label: 'Results', value: (resultsRes.data ?? []).length,       icon: BarChart3,     color: 'text-purple-500' },
+    // The legacy `results` table was never written to, so this card always
+    // read 0 — sample_tests is where results actually live.
+    { label: 'Results', value: workflowRows.length,                  icon: BarChart3,     color: 'text-purple-500' },
   ]
 
   return (
@@ -138,6 +148,9 @@ export default async function AdminDashboard({ searchParams }: Props) {
           </div>
         ))}
       </div>
+
+      {/* Workflow indicators */}
+      <WorkflowIndicators rows={workflowRows} basePath="/admin" />
 
       {/* Charts */}
       <DashboardCharts

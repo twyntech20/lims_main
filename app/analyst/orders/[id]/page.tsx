@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { ArrowLeft, Calendar, FileText, User } from 'lucide-react'
 import { formatDate, formatDateTime, getOrderStatusColor, getPriorityColor, getPriorityLabel } from '@/lib/utils'
 import SubmitToClientPanel from '@/components/orders/SubmitToClientPanel'
+import { personName } from '@/lib/workflow'
 
 const STATUS_LABELS: Record<string, string> = {
   new: 'New', submitted: 'Submitted', in_progress: 'In Progress',
@@ -30,6 +31,7 @@ export default async function AnalystOrderDetailPage({ params }: Props) {
     .select(`
       *,
       clients(id, client_name, email, phone),
+      released_by_profile:profiles!orders_released_by_fkey(first_name, last_name, email),
       samples(
         id, sample_id, description, matrix_type, collection_date, status,
         sample_tests(
@@ -51,6 +53,7 @@ export default async function AnalystOrderDetailPage({ params }: Props) {
   const allApproved = allSampleTests.length > 0 && allSampleTests.every((st: any) => st.status === 'approved')
   const hasAnyApproved = allSampleTests.some((st: any) => st.status === 'approved')
   const isOverdue = order.date_due && new Date(order.date_due) < new Date() && order.status !== 'completed'
+  const isReleased = !!(order as any).released_at
 
   const approvedRows = allSampleTests
     .filter((st: any) => st.status === 'approved')
@@ -178,10 +181,16 @@ export default async function AnalystOrderDetailPage({ params }: Props) {
             </div>
           </div>
 
-          {order.status === 'completed' ? (
-            <div className="bg-green-50 border border-green-200 rounded-2xl p-5 flex items-center gap-3">
-              <FileText className="w-5 h-5 text-green-600 shrink-0" />
-              <p className="text-sm text-green-800 font-medium">Submitted to client.</p>
+          {isReleased ? (
+            <div className="bg-green-50 border border-green-200 rounded-2xl p-5">
+              <div className="flex items-center gap-2 mb-2">
+                <FileText className="w-5 h-5 text-green-600 shrink-0" />
+                <p className="text-sm text-green-800 font-medium">Released to client</p>
+              </div>
+              <div className="text-sm text-green-800 space-y-1">
+                <p>Released by <span className="font-medium">{personName((order as any).released_by_profile)}</span></p>
+                <p>{formatDateTime((order as any).released_at)}</p>
+              </div>
             </div>
           ) : allApproved ? (
             <SubmitToClientPanel

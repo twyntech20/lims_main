@@ -2,9 +2,20 @@ import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import { FlaskConical } from 'lucide-react'
 import WorkQueueTable from '@/components/work-queue/WorkQueueTable'
+import { RESULT_QUEUE_SELECT, REVIEWER_SELECT } from '@/lib/queries/result-queue'
+import { workflowState, type WorkflowState } from '@/lib/workflow'
 
 interface SearchParams { status?: string; category?: string }
 interface Props { searchParams: Promise<SearchParams> }
+
+const TAB_STATE: Record<string, WorkflowState> = {
+  pending:  'awaiting_entry',
+  entered:  'awaiting_review',
+  returned: 'returned',
+  reviewed: 'in_review',
+  approved: 'approved',
+  released: 'released',
+}
 
 export default async function AnalystWorkQueuePage({ searchParams }: Props) {
   const { status, category } = await searchParams
@@ -16,75 +27,47 @@ export default async function AnalystWorkQueuePage({ searchParams }: Props) {
   // submitSampleForReview (analyst with can_review, or admin/manager).
   const { data: reviewerProfiles } = await supabase
     .from('profiles')
-    .select('id, first_name, last_name, email')
+    .select(REVIEWER_SELECT)
     .or('can_review.eq.true,role.in.(admin,manager)')
     .eq('is_active', true)
     .neq('id', user.id)
     .order('first_name')
 
-  // Analyst sees: tests pending entry, or tests they entered that haven't been approved yet
   let query = supabase
     .from('sample_tests')
-    .select(`
-      id,
-      status,
-      result,
-      unit,
-      qualifier,
-      mdl,
-      dilution_factor,
-      analyst_notes,
-      entered_at,
-      samples (
-        id,
-        sample_id,
-        description,
-        matrix_type,
-        collection_date,
-        orders (
-          id,
-          priority,
-          date_due,
-          customer_name,
-          assigned_analyst_id,
-          clients ( client_name )
-        )
-      ),
-      tests (
-        id,
-        name,
-        code,
-        category,
-        unit
-      ),
-      entered_by_profile:profiles!sample_tests_entered_by_fkey ( first_name, last_name, email )
-    `)
+    .select(RESULT_QUEUE_SELECT)
     .order('entered_at', { ascending: true, nullsFirst: true })
 
-  if (status)   query = query.eq('status', status)
   if (category) query = query.eq('tests.category', category)
 
   const { data: sampleTests } = await query
 
-  // Filter: show only tests for orders assigned to this analyst, OR tests entered by this analyst
-  // (approved results stay visible here too — Analyst 1 needs to see the outcome of
-  // their own submissions once Analyst 2 has reviewed them, not just the open work).
-  const filtered = (sampleTests ?? []).filter(st => {
-    const order = (st.samples as any)?.orders
-    return order?.assigned_analyst_id === user.id || (st as any).entered_by_profile?.id === user.id
+  // Show only tests for orders assigned to this analyst, OR tests they
+  // entered themselves — approved results stay visible so Analyst 1 sees
+  // the outcome of their own submissions, not just the open work.
+  const mine = ((sampleTests ?? []) as any[]).filter(st =>
+    st.samples?.orders?.assigned_analyst_id === user.id ||
+    st.entered_by_profile?.id === user.id
+  )
+
+  const stateOf = (st: any): WorkflowState => workflowState({
+    status: st.status,
+    returned_at: st.returned_at,
+    assigned_reviewer_id: st.assigned_reviewer_id,
+    order_released_at: st.samples?.orders?.released_at,
   })
 
-  const pendingCount  = filtered.filter(s => s.status === 'pending').length
-  const enteredCount  = filtered.filter(s => s.status === 'entered').length
-  const reviewedCount = filtered.filter(s => s.status === 'reviewed').length
-  const approvedCount = filtered.filter(s => s.status === 'approved').length
+  const filtered = status ? mine.filter(st => stateOf(st) === TAB_STATE[status]) : mine
+  const countState = (s: WorkflowState) => mine.filter(st => stateOf(st) === s).length
 
   const tabs = [
-    { key: '',         label: 'All',      count: filtered.length },
-    { key: 'pending',  label: 'Pending',  count: pendingCount },
-    { key: 'entered',  label: 'Entered',  count: enteredCount },
-    { key: 'reviewed', label: 'In Review', count: reviewedCount },
-    { key: 'approved', label: 'Approved', count: approvedCount },
+    { key: '',         label: 'All',              count: mine.length },
+    { key: 'pending',  label: 'Awaiting entry',   count: countState('awaiting_entry') },
+    { key: 'returned', label: 'Returned to me',   count: countState('returned') },
+    { key: 'entered',  label: 'Awaiting review',  count: countState('awaiting_review') },
+    { key: 'reviewed', label: 'In review',        count: countState('in_review') },
+    { key: 'approved', label: 'Ready to release', count: countState('approved') },
+    { key: 'released', label: 'Released',         count: countState('released') },
   ]
 
   return (
@@ -95,12 +78,13 @@ export default async function AnalystWorkQueuePage({ searchParams }: Props) {
           My Work Queue
         </h1>
         <p className="text-slate-500 text-sm mt-1">
-          {pendingCount} pending entry · {enteredCount} awaiting review
+          {countState('awaiting_entry')} to enter · {countState('returned')} returned to you ·{' '}
+          {countState('awaiting_review')} to assign · {countState('in_review')} with a reviewer
         </p>
       </div>
 
       {/* Status Tabs */}
-      <div className="flex gap-1 mb-4 bg-slate-100 rounded-xl p-1 w-fit">
+      <div className="flex gap-1 mb-4 bg-slate-100 rounded-xl p-1 w-fit flex-wrap">
         {tabs.map(tab => {
           const active = (status ?? '') === tab.key
           return (

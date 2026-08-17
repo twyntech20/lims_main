@@ -6,6 +6,8 @@ import { formatDate, formatDateTime, getOrderStatusColor, getPriorityColor, getP
 import AssignAnalystForm from '@/components/orders/AssignAnalystForm'
 import UpdateStatusForm from '@/components/orders/UpdateStatusForm'
 import AddSampleForm from '@/components/orders/AddSampleForm'
+import SubmitToClientPanel from '@/components/orders/SubmitToClientPanel'
+import { personName, workflowState, WORKFLOW_LABEL } from '@/lib/workflow'
 
 const STATUS_LABELS: Record<string, string> = {
   new: 'New', submitted: 'Submitted', in_progress: 'In Progress',
@@ -25,9 +27,14 @@ export default async function AdminOrderDetailPage({ params }: Props) {
         *,
         clients(id, client_name, email, phone),
         profiles!orders_assigned_analyst_id_fkey(id, first_name, last_name, email),
+        released_by_profile:profiles!orders_released_by_fkey(id, first_name, last_name, email),
         samples(
           id, sample_id, description, matrix_type, collection_date, collection_location, status,
-          sample_tests(id, status, tests(id, name, code, category))
+          sample_tests(
+            id, status, result, unit, qualifier, returned_at, assigned_reviewer_id, approved_at,
+            tests(id, name, code, category),
+            approved_by_profile:profiles!sample_tests_approved_by_fkey(first_name, last_name, email)
+          )
         )
       `)
       .eq('id', id)
@@ -42,6 +49,25 @@ export default async function AdminOrderDetailPage({ params }: Props) {
   const tests = testsRes.data ?? []
 
   const isOverdue = order.date_due && new Date(order.date_due) < new Date() && !['completed', 'cancelled'].includes(order.status)
+
+  // Release readiness, computed from the results themselves.
+  const allSampleTests = (order.samples ?? []).flatMap((s: any) => s.sample_tests ?? [])
+  const notApproved    = allSampleTests.filter((st: any) => st.status !== 'approved')
+  const readyToRelease = allSampleTests.length > 0 && notApproved.length === 0
+  const isReleased     = !!order.released_at
+
+  const approvedRows = allSampleTests
+    .filter((st: any) => st.status === 'approved')
+    .map((st: any) => ({
+      id: st.id,
+      testName: st.tests?.name ?? '—',
+      result: st.result,
+      unit: st.unit,
+      qualifier: st.qualifier,
+      sampleId: (order.samples ?? []).find((s: any) => s.sample_tests?.some((t: any) => t.id === st.id))?.sample_id ?? '—',
+      reviewerName: personName(st.approved_by_profile),
+      approvedAt: st.approved_at,
+    }))
 
   return (
     <div className="p-6 max-w-6xl mx-auto">
@@ -151,11 +177,20 @@ export default async function AdminOrderDetailPage({ params }: Props) {
                     </div>
                     {sample.sample_tests?.length > 0 && (
                       <div className="mt-3 flex flex-wrap gap-1.5">
-                        {sample.sample_tests.map((st: any) => (
-                          <span key={st.id} className="text-xs bg-blue-50 text-blue-700 px-2 py-0.5 rounded-full">
-                            {st.tests?.name ?? '—'}
-                          </span>
-                        ))}
+                        {sample.sample_tests.map((st: any) => {
+                          const state = workflowState({
+                            status: st.status,
+                            returned_at: st.returned_at,
+                            assigned_reviewer_id: st.assigned_reviewer_id,
+                            order_released_at: order.released_at,
+                          })
+                          return (
+                            <span key={st.id} className="text-xs bg-blue-50 text-blue-700 px-2 py-0.5 rounded-full">
+                              {st.tests?.name ?? '—'}
+                              <span className="text-blue-400 ml-1">· {WORKFLOW_LABEL[state]}</span>
+                            </span>
+                          )
+                        })}
                       </div>
                     )}
                   </div>
@@ -212,6 +247,40 @@ export default async function AdminOrderDetailPage({ params }: Props) {
               ))}
             </div>
           </div>
+
+          {/* Controlled release to the client */}
+          {isReleased ? (
+            <div className="bg-green-50 border border-green-200 rounded-2xl p-5">
+              <div className="flex items-center gap-2 mb-2">
+                <FileText className="w-4 h-4 text-green-600" />
+                <h2 className="font-semibold text-green-900">Released to client</h2>
+              </div>
+              <div className="text-sm text-green-800 space-y-1">
+                <p>Released by <span className="font-medium">{personName(order.released_by_profile)}</span></p>
+                <p>{formatDateTime(order.released_at)}</p>
+              </div>
+              <Link href={`/admin/reports/${order.id}`}
+                className="mt-3 inline-flex items-center gap-1.5 text-xs bg-white border border-green-300 text-green-800 px-3 py-1.5 rounded-lg font-medium hover:bg-green-100 transition">
+                <FileText className="w-3 h-3" /> View approved report
+              </Link>
+            </div>
+          ) : readyToRelease ? (
+            <SubmitToClientPanel
+              orderId={order.id}
+              orderNumber={order.order_number}
+              clientName={order.clients?.client_name ?? order.customer_name ?? '—'}
+              rows={approvedRows}
+            />
+          ) : (
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
+              <h2 className="font-semibold text-slate-900 mb-1">Release to Client</h2>
+              <p className="text-sm text-slate-500">
+                {allSampleTests.length === 0
+                  ? 'This order has no tests yet.'
+                  : `Blocked — ${notApproved.length} of ${allSampleTests.length} result(s) still need to be entered, reviewed or approved.`}
+              </p>
+            </div>
+          )}
 
           {/* Status update */}
           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">

@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { Beaker, CheckSquare, Clock, ClipboardList } from 'lucide-react'
 import { formatDate } from '@/lib/utils'
+import WorkflowIndicators from '@/components/dashboard/WorkflowIndicators'
 
 export default async function AnalystDashboard() {
   const supabase = await createClient()
@@ -28,6 +29,19 @@ export default async function AnalystDashboard() {
         .eq('status', 'pending')
         .in('order_id', myOrderIds)
     : { count: 0 }
+
+  // This analyst's own result workload — everything they entered, plus
+  // everything on the orders assigned to them.
+  const { data: allResults } = await supabase
+    .from('sample_tests')
+    .select(`
+      status, returned_at, assigned_reviewer_id, entered_at, entered_by,
+      samples ( orders ( date_due, released_at, assigned_analyst_id ) )
+    `)
+
+  const myResults = ((allResults ?? []) as any[]).filter(st =>
+    st.entered_by === user!.id || st.samples?.orders?.assigned_analyst_id === user!.id
+  )
 
   const statCards = [
     { label: 'Assigned to Me', value: orders.length, icon: ClipboardList, color: 'text-blue-600 bg-blue-50' },
@@ -68,6 +82,8 @@ export default async function AnalystDashboard() {
           </div>
         ))}
       </div>
+
+      <WorkflowIndicators rows={myResults} basePath="/analyst" />
 
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm">
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">

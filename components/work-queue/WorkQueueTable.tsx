@@ -2,9 +2,15 @@
 
 import { useState, useTransition } from 'react'
 import { enterResultsBatch, submitSampleForReview } from '@/app/actions/results'
-import { ChevronDown, ChevronRight, CheckCircle2, Clock, FlaskConical, Loader2 } from 'lucide-react'
+import { ChevronDown, ChevronRight, CheckCircle2, Clock, FlaskConical, Loader2, Undo2, AlertTriangle, Lock } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { Toaster } from 'react-hot-toast'
+import {
+  workflowState, WORKFLOW_LABEL, WORKFLOW_BADGE, WORKFLOW_NEXT_ACTION,
+  personName, waitingTime, isOverdue,
+} from '@/lib/workflow'
+
+type Person = { id?: string; first_name: string | null; last_name: string | null; email: string } | null
 
 type SampleTest = {
   id: string
@@ -16,6 +22,10 @@ type SampleTest = {
   dilution_factor: number | null
   analyst_notes: string | null
   entered_at: string | null
+  returned_at: string | null
+  rejection_reason: string | null
+  review_round: number | null
+  assigned_reviewer_id: string | null
   samples: {
     id: string
     sample_id: string
@@ -27,6 +37,7 @@ type SampleTest = {
       priority: string
       date_due: string | null
       customer_name: string | null
+      released_at: string | null
       clients: { client_name: string } | null
     } | null
   } | null
@@ -37,24 +48,12 @@ type SampleTest = {
     category: string
     unit: string | null
   } | null
-  entered_by_profile: { first_name: string | null; last_name: string | null; email: string } | null
+  entered_by_profile: Person
+  assigned_reviewer_profile: Person
+  returned_by_profile: Person
 }
 
 export type Reviewer = { id: string; first_name: string | null; last_name: string | null; email: string }
-
-const STATUS_LABEL: Record<string, string> = {
-  pending:  'Pending',
-  entered:  'Entered',
-  reviewed: 'Pending Review',
-  approved: 'Approved',
-}
-
-const STATUS_BADGE: Record<string, string> = {
-  pending:  'bg-slate-100 text-slate-600',
-  entered:  'bg-yellow-50 text-yellow-700 border border-yellow-200',
-  reviewed: 'bg-blue-50 text-blue-700 border border-blue-200',
-  approved: 'bg-green-50 text-green-700 border border-green-200',
-}
 
 const PRIORITY_BADGE: Record<string, string> = {
   normal:       'bg-slate-100 text-slate-600',
@@ -83,6 +82,13 @@ function ResultRow({ st, reviewers }: { st: SampleTest; reviewers: Reviewer[] })
   const [dirty, setDirty]                 = useState(false)
   const [reviewing, startReview]          = useTransition()
   const [reviewerId, setReviewerId]       = useState('')
+
+  const state = workflowState({
+    status: st.status,
+    returned_at: st.returned_at,
+    assigned_reviewer_id: st.assigned_reviewer_id,
+    order_released_at: st.samples?.orders?.released_at,
+  })
 
   function markDirty() { setDirty(true) }
 
@@ -117,85 +123,117 @@ function ResultRow({ st, reviewers }: { st: SampleTest; reviewers: Reviewer[] })
     })
   }
 
-  const isReadonly = st.status === 'reviewed' || st.status === 'approved'
+  const isReadonly = state === 'in_review' || state === 'approved' || state === 'released'
+  const canSubmitForReview = state === 'awaiting_review' || state === 'returned'
+
+  // Who currently holds this piece of work.
+  const owner = state === 'in_review'
+    ? `Reviewer: ${personName(st.assigned_reviewer_profile)}`
+    : st.entered_by_profile
+      ? `Analyst: ${personName(st.entered_by_profile)}`
+      : 'Unassigned'
+
+  // The clock that matters for this state: how long it has been waiting
+  // where it is now.
+  const waitingSince = state === 'in_review' ? st.entered_at : st.returned_at ?? st.entered_at
 
   return (
-    <tr className="border-b border-slate-100 hover:bg-slate-50 transition">
-      {/* Test */}
-      <td className="px-4 py-3">
-        <div className="font-medium text-slate-900 text-sm">{st.tests?.name ?? '—'}</div>
-        {st.tests?.code && <div className="text-xs text-slate-400 font-mono">{st.tests.code}</div>}
-        <span className={`mt-0.5 inline-block text-xs px-1.5 py-0.5 rounded-full ${
-          st.tests?.category === 'microbiology' ? 'bg-green-50 text-green-700' : 'bg-blue-50 text-blue-700'
-        }`}>{st.tests?.category}</span>
-      </td>
+    <>
+      <tr className="border-b border-slate-100 hover:bg-slate-50 transition">
+        {/* Test */}
+        <td className="px-4 py-3">
+          <div className="font-medium text-slate-900 text-sm">{st.tests?.name ?? '—'}</div>
+          {st.tests?.code && <div className="text-xs text-slate-400 font-mono">{st.tests.code}</div>}
+          <span className={`mt-0.5 inline-block text-xs px-1.5 py-0.5 rounded-full ${
+            st.tests?.category === 'microbiology' ? 'bg-green-50 text-green-700' : 'bg-blue-50 text-blue-700'
+          }`}>{st.tests?.category}</span>
+        </td>
 
-      {/* Result */}
-      <td className="px-3 py-3 w-32">
-        {isReadonly
-          ? <span className="text-sm text-slate-700">{qualifier === 'ND' ? 'ND' : result || '—'}</span>
-          : <input value={qualifier === 'ND' ? '' : result}
-              onChange={e => { setResult(e.target.value); markDirty() }}
-              disabled={qualifier === 'ND'}
-              placeholder="0.00"
-              className={INPUT} />
-        }
-      </td>
+        {/* Result */}
+        <td className="px-3 py-3 w-32">
+          {isReadonly
+            ? <span className="text-sm text-slate-700">{qualifier === 'ND' ? 'ND' : result || '—'}</span>
+            : <input value={qualifier === 'ND' ? '' : result}
+                onChange={e => { setResult(e.target.value); markDirty() }}
+                disabled={qualifier === 'ND'}
+                placeholder="0.00"
+                className={INPUT} />
+          }
+        </td>
 
-      {/* Unit */}
-      <td className="px-3 py-3 w-24">
-        {isReadonly
-          ? <span className="text-sm text-slate-500">{unit || '—'}</span>
-          : <input value={unit} onChange={e => { setUnit(e.target.value); markDirty() }}
-              placeholder={st.tests?.unit ?? 'unit'} className={INPUT} />
-        }
-      </td>
+        {/* Unit */}
+        <td className="px-3 py-3 w-24">
+          {isReadonly
+            ? <span className="text-sm text-slate-500">{unit || '—'}</span>
+            : <input value={unit} onChange={e => { setUnit(e.target.value); markDirty() }}
+                placeholder={st.tests?.unit ?? 'unit'} className={INPUT} />
+          }
+        </td>
 
-      {/* Qualifier */}
-      <td className="px-3 py-3 w-24">
-        {isReadonly
-          ? <span className="text-sm text-slate-500">{qualifier || '—'}</span>
-          : <select value={qualifier} onChange={e => { setQualifier(e.target.value); markDirty() }} className={INPUT}>
-              <option value="">—</option>
-              <option value="ND">ND</option>
-              <option value="<">{"<"}</option>
-              <option value=">">{">"}</option>
-              <option value="B">B</option>
-              <option value="E">E</option>
-            </select>
-        }
-      </td>
+        {/* Qualifier */}
+        <td className="px-3 py-3 w-24">
+          {isReadonly
+            ? <span className="text-sm text-slate-500">{qualifier || '—'}</span>
+            : <select value={qualifier} onChange={e => { setQualifier(e.target.value); markDirty() }} className={INPUT}>
+                <option value="">—</option>
+                <option value="ND">ND</option>
+                <option value="<">{"<"}</option>
+                <option value=">">{">"}</option>
+                <option value="B">B</option>
+                <option value="E">E</option>
+              </select>
+          }
+        </td>
 
-      {/* MDL */}
-      <td className="px-3 py-3 w-24">
-        {isReadonly
-          ? <span className="text-sm text-slate-500">{mdl || '—'}</span>
-          : <input value={mdl} onChange={e => { setMdl(e.target.value); markDirty() }}
-              placeholder="MDL" className={INPUT} />
-        }
-      </td>
+        {/* MDL */}
+        <td className="px-3 py-3 w-24">
+          {isReadonly
+            ? <span className="text-sm text-slate-500">{mdl || '—'}</span>
+            : <input value={mdl} onChange={e => { setMdl(e.target.value); markDirty() }}
+                placeholder="MDL" className={INPUT} />
+          }
+        </td>
 
-      {/* Dilution */}
-      <td className="px-3 py-3 w-20">
-        {isReadonly
-          ? <span className="text-sm text-slate-500">{dilution || '1'}</span>
-          : <input value={dilution} onChange={e => { setDilution(e.target.value); markDirty() }}
-              placeholder="1" type="number" min="1" step="0.1" className={INPUT} />
-        }
-      </td>
+        {/* Dilution */}
+        <td className="px-3 py-3 w-20">
+          {isReadonly
+            ? <span className="text-sm text-slate-500">{dilution || '1'}</span>
+            : <input value={dilution} onChange={e => { setDilution(e.target.value); markDirty() }}
+                placeholder="1" type="number" min="0" step="0.1" className={INPUT} />
+          }
+        </td>
 
-      {/* Status */}
-      <td className="px-3 py-3 w-28">
-        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATUS_BADGE[st.status] ?? 'bg-slate-100 text-slate-600'}`}>
-          {STATUS_LABEL[st.status] ?? st.status}
-        </span>
-      </td>
+        {/* Workflow state */}
+        <td className="px-3 py-3 w-40">
+          <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${WORKFLOW_BADGE[state]}`}>
+            {WORKFLOW_LABEL[state]}
+          </span>
+          {(st.review_round ?? 1) > 1 && (
+            <div className="text-[11px] text-slate-400 mt-1">Review round {st.review_round}</div>
+          )}
+        </td>
 
-      {/* Actions */}
-      <td className="px-3 py-3 w-48">
-        {isReadonly
-          ? <span className="text-xs text-slate-400 flex items-center gap-1"><CheckCircle2 className="w-3 h-3" /> {STATUS_LABEL[st.status] ?? st.status}</span>
-          : <div className="flex flex-col gap-1.5">
+        {/* Who holds it, and for how long */}
+        <td className="px-3 py-3 w-44 text-xs text-slate-500">
+          <div className="text-slate-700">{owner}</div>
+          {state !== 'released' && state !== 'awaiting_entry' && (
+            <div className="text-slate-400 mt-0.5">Waiting {waitingTime(waitingSince)}</div>
+          )}
+        </td>
+
+        {/* Next action */}
+        <td className="px-3 py-3 w-44 text-xs text-slate-500">{WORKFLOW_NEXT_ACTION[state]}</td>
+
+        {/* Actions */}
+        <td className="px-3 py-3 w-48">
+          {state === 'released' ? (
+            <span className="text-xs text-slate-400 flex items-center gap-1"><Lock className="w-3 h-3" /> Released</span>
+          ) : state === 'approved' ? (
+            <span className="text-xs text-green-600 flex items-center gap-1"><CheckCircle2 className="w-3 h-3" /> Approved</span>
+          ) : state === 'in_review' ? (
+            <span className="text-xs text-slate-400 flex items-center gap-1"><Clock className="w-3 h-3" /> With reviewer</span>
+          ) : (
+            <div className="flex flex-col gap-1.5">
               {dirty && (
                 <button onClick={handleSave} disabled={pending}
                   className="flex items-center justify-center gap-1 bg-blue-600 hover:bg-blue-500 disabled:bg-blue-300 text-white text-xs font-medium px-3 py-1.5 rounded-lg transition">
@@ -203,7 +241,7 @@ function ResultRow({ st, reviewers }: { st: SampleTest; reviewers: Reviewer[] })
                   {pending ? 'Saving…' : 'Save'}
                 </button>
               )}
-              {st.status === 'entered' && !dirty && (
+              {canSubmitForReview && !dirty && (
                 <div className="flex flex-col gap-1">
                   <select value={reviewerId} onChange={e => setReviewerId(e.target.value)}
                     className="text-xs bg-white border border-slate-300 rounded-lg px-1.5 py-1 focus:outline-none focus:ring-2 focus:ring-blue-500">
@@ -217,21 +255,41 @@ function ResultRow({ st, reviewers }: { st: SampleTest; reviewers: Reviewer[] })
                   <button onClick={handleAssignReview} disabled={reviewing || !reviewerId}
                     className="flex items-center justify-center gap-1 bg-slate-800 hover:bg-slate-700 disabled:bg-slate-400 text-white text-xs font-medium px-3 py-1.5 rounded-lg transition">
                     {reviewing ? <Loader2 className="w-3 h-3 animate-spin" /> : <Clock className="w-3 h-3" />}
-                    {reviewing ? '…' : 'Assign Review'}
+                    {reviewing ? '…' : state === 'returned' ? 'Re-submit Review' : 'Assign Review'}
                   </button>
                 </div>
               )}
             </div>
-        }
-      </td>
-    </tr>
+          )}
+        </td>
+      </tr>
+
+      {/* What is blocking this result — the reviewer's reason, kept until
+          it goes back for review so the analyst can see what to fix. */}
+      {state === 'returned' && st.rejection_reason && (
+        <tr className="border-b border-slate-100 bg-red-50">
+          <td colSpan={10} className="px-4 py-2">
+            <div className="flex items-start gap-2 text-xs">
+              <Undo2 className="w-3.5 h-3.5 text-red-600 mt-0.5 shrink-0" />
+              <div>
+                <span className="font-semibold text-red-700">
+                  Returned by {personName(st.returned_by_profile)}
+                  {st.returned_at ? ` · ${waitingTime(st.returned_at)} ago` : ''}:
+                </span>{' '}
+                <span className="text-red-800">{st.rejection_reason}</span>
+              </div>
+            </div>
+          </td>
+        </tr>
+      )}
+    </>
   )
 }
 
 type GroupedBySample = {
   sampleKey: string
   sample: SampleTest['samples']
-  order: SampleTest['samples'] extends null ? null : NonNullable<SampleTest['samples']>['orders']
+  order: NonNullable<SampleTest['samples']>['orders']
   tests: SampleTest[]
 }
 
@@ -253,7 +311,7 @@ export default function WorkQueueTable({ rows, orderBasePath = '/admin/orders', 
   for (const row of rows) {
     const key = row.samples?.id ?? 'unknown'
     if (!seen.has(key)) {
-      const g: GroupedBySample = { sampleKey: key, sample: row.samples, order: row.samples?.orders as any, tests: [] }
+      const g: GroupedBySample = { sampleKey: key, sample: row.samples, order: row.samples?.orders ?? null, tests: [] }
       seen.set(key, g)
       groups.push(g)
     }
@@ -275,10 +333,16 @@ export default function WorkQueueTable({ rows, orderBasePath = '/admin/orders', 
       <div className="space-y-4">
         {groups.map(({ sampleKey, sample, order, tests }) => {
           const isCollapsed = collapsed.has(sampleKey)
-          const allDone = tests.every(t => t.status === 'approved')
-          const allEntered = tests.every(t => ['entered','reviewed','approved'].includes(t.status))
-          const pendingCount = tests.filter(t => t.status === 'pending').length
-          const enteredCount = tests.filter(t => t.status === 'entered').length
+          const states = tests.map(t => workflowState({
+            status: t.status,
+            returned_at: t.returned_at,
+            assigned_reviewer_id: t.assigned_reviewer_id,
+            order_released_at: order?.released_at,
+          }))
+          const count = (s: string) => states.filter(x => x === s).length
+          const allDone = states.every(s => s === 'approved' || s === 'released')
+          const returnedCount = count('returned')
+          const overdue = isOverdue(order?.date_due) && !allDone
 
           return (
             <div key={sampleKey} className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
@@ -303,6 +367,11 @@ export default function WorkQueueTable({ rows, orderBasePath = '/admin/orders', 
                         {PRIORITY_LABEL[order.priority]}
                       </span>
                     )}
+                    {overdue && (
+                      <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-red-100 text-red-700 flex items-center gap-1">
+                        <AlertTriangle className="w-3 h-3" /> Overdue
+                      </span>
+                    )}
                   </div>
                   <div className="flex items-center gap-4 mt-1 text-xs text-slate-400">
                     {order?.clients?.client_name && <span>{order.clients.client_name}</span>}
@@ -311,26 +380,40 @@ export default function WorkQueueTable({ rows, orderBasePath = '/admin/orders', 
                       <a href={`${orderBasePath}/${order.id}`} onClick={e => e.stopPropagation()}
                         className="text-blue-500 hover:underline">View order</a>
                     )}
-                    {order?.date_due && <span>Due: {new Date(order.date_due).toLocaleDateString()}</span>}
+                    {order?.date_due && (
+                      <span className={overdue ? 'text-red-500 font-medium' : ''}>
+                        Due: {new Date(order.date_due).toLocaleDateString()}
+                      </span>
+                    )}
                     {sample?.collection_date && (
                       <span>Collected: {new Date(sample.collection_date).toLocaleDateString()}</span>
                     )}
                   </div>
                 </div>
-                <div className="flex items-center gap-3 flex-shrink-0">
-                  {pendingCount > 0 && (
-                    <span className="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">
-                      {pendingCount} pending
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  {returnedCount > 0 && (
+                    <span className="text-xs bg-red-50 text-red-700 border border-red-200 px-2 py-0.5 rounded-full">
+                      {returnedCount} returned
                     </span>
                   )}
-                  {enteredCount > 0 && (
+                  {count('awaiting_entry') > 0 && (
+                    <span className="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">
+                      {count('awaiting_entry')} to enter
+                    </span>
+                  )}
+                  {count('awaiting_review') > 0 && (
                     <span className="text-xs bg-yellow-50 text-yellow-700 border border-yellow-200 px-2 py-0.5 rounded-full">
-                      {enteredCount} entered
+                      {count('awaiting_review')} to assign
+                    </span>
+                  )}
+                  {count('in_review') > 0 && (
+                    <span className="text-xs bg-blue-50 text-blue-700 border border-blue-200 px-2 py-0.5 rounded-full">
+                      {count('in_review')} in review
                     </span>
                   )}
                   {allDone && (
                     <span className="text-xs bg-green-50 text-green-700 border border-green-200 px-2 py-0.5 rounded-full flex items-center gap-1">
-                      <CheckCircle2 className="w-3 h-3" /> Complete
+                      <CheckCircle2 className="w-3 h-3" /> {count('released') > 0 ? 'Released' : 'Ready for release'}
                     </span>
                   )}
                   <span className="text-xs text-slate-400">{tests.length} test{tests.length !== 1 ? 's' : ''}</span>
@@ -350,6 +433,8 @@ export default function WorkQueueTable({ rows, orderBasePath = '/admin/orders', 
                         <th className="text-left px-3 py-2 text-xs font-semibold text-slate-500 uppercase tracking-wide">MDL</th>
                         <th className="text-left px-3 py-2 text-xs font-semibold text-slate-500 uppercase tracking-wide">Dilution</th>
                         <th className="text-left px-3 py-2 text-xs font-semibold text-slate-500 uppercase tracking-wide">Status</th>
+                        <th className="text-left px-3 py-2 text-xs font-semibold text-slate-500 uppercase tracking-wide">Owner</th>
+                        <th className="text-left px-3 py-2 text-xs font-semibold text-slate-500 uppercase tracking-wide">Next action</th>
                         <th className="px-3 py-2" />
                       </tr>
                     </thead>

@@ -222,7 +222,7 @@ export async function submitToClient(orderId: string) {
 
   const { data: order } = await supabase
     .from('orders')
-    .select('id, order_number, status, assigned_analyst_id')
+    .select('id, order_number, status, assigned_analyst_id, released_at')
     .eq('id', orderId)
     .single()
   if (!order) throw new Error('Order not found')
@@ -234,7 +234,9 @@ export async function submitToClient(orderId: string) {
     throw new Error('Only the assigned analyst (or an admin) can submit this order to the client')
   }
 
-  if (order.status === 'completed') throw new Error('This order has already been submitted to the client')
+  if (order.released_at || order.status === 'completed') {
+    throw new Error('This order has already been released to the client')
+  }
 
   // Every result must be reviewed and approved before it can go out —
   // this is the "Ready for Client" gate, computed rather than stored.
@@ -249,9 +251,27 @@ export async function submitToClient(orderId: string) {
     throw new Error(`${notApproved.length} result(s) are not yet approved — cannot submit to client`)
   }
 
+  // An open amendment means someone has flagged a result as wrong. Nothing
+  // goes to a client while that question is unresolved.
+  const { data: openAmendments } = await supabase
+    .from('amendments')
+    .select('id')
+    .eq('order_id', orderId)
+    .eq('status', 'pending')
+
+  if (openAmendments?.length) {
+    throw new Error(`${openAmendments.length} amendment request(s) are still pending on this order — resolve them before releasing`)
+  }
+
+  const releasedAt = new Date().toISOString()
   const { error } = await supabase
     .from('orders')
-    .update({ status: 'completed', date_completed: new Date().toISOString() })
+    .update({
+      status:         'completed',
+      date_completed: releasedAt,
+      released_by:    user.id,      // who authorised the release
+      released_at:    releasedAt,   // and when
+    })
     .eq('id', orderId)
   if (error) throw new Error(error.message)
 
@@ -260,12 +280,19 @@ export async function submitToClient(orderId: string) {
     action: 'submitted_to_client',
     table_name: 'orders',
     record_id: orderId,
-    new_values: { order_number: order.order_number, status: 'completed' },
+    new_values: {
+      order_number: order.order_number,
+      status: 'completed',
+      released_at: releasedAt,
+      results_released: sampleTests.length,
+    },
   })
 
   revalidatePath(`/admin/orders/${orderId}`)
   revalidatePath(`/analyst/orders/${orderId}`)
   revalidatePath('/admin/reports')
+  revalidatePath('/admin/dashboard')
+  revalidatePath('/analyst/dashboard')
 }
 
 export async function addSampleToOrder(formData: FormData) {

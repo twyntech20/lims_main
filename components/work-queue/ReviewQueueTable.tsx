@@ -2,8 +2,14 @@
 
 import { useState, useTransition } from 'react'
 import { approveSampleTest, rejectToAnalyst } from '@/app/actions/results'
-import { CheckCircle2, XCircle, ChevronDown, ChevronRight, ClipboardCheck, Loader2 } from 'lucide-react'
+import { CheckCircle2, XCircle, ChevronDown, ChevronRight, ClipboardCheck, Loader2, AlertTriangle, Undo2 } from 'lucide-react'
 import toast, { Toaster } from 'react-hot-toast'
+import {
+  workflowState, WORKFLOW_LABEL, WORKFLOW_BADGE,
+  personName, waitingTime, isOverdue, MIN_COMMENT_LENGTH,
+} from '@/lib/workflow'
+
+type Person = { first_name: string | null; last_name: string | null; email: string } | null
 
 type SampleTest = {
   id: string
@@ -16,6 +22,10 @@ type SampleTest = {
   analyst_notes: string | null
   entered_at: string | null
   reviewed_at: string | null
+  returned_at: string | null
+  rejection_reason: string | null
+  review_round: number | null
+  assigned_reviewer_id: string | null
   samples: {
     id: string
     sample_id: string
@@ -24,9 +34,11 @@ type SampleTest = {
     collection_date: string | null
     orders: {
       id: string
+      order_number?: string | null
       priority: string
       date_due: string | null
       customer_name: string | null
+      released_at: string | null
       clients: { client_name: string } | null
     } | null
   } | null
@@ -37,14 +49,21 @@ type SampleTest = {
     category: string
     unit: string | null
   } | null
-  entered_by_profile: { first_name: string | null; last_name: string | null; email: string } | null
-  reviewed_by_profile: { first_name: string | null; last_name: string | null; email: string } | null
+  entered_by_profile: Person
+  reviewed_by_profile: Person
+  assigned_reviewer_profile: Person
+  returned_by_profile: Person
 }
 
-const STATUS_BADGE: Record<string, string> = {
-  entered:  'bg-yellow-50 text-yellow-700 border border-yellow-200',
-  reviewed: 'bg-blue-50 text-blue-700 border border-blue-200',
-  approved: 'bg-green-50 text-green-700 border border-green-200',
+const PRIORITY_BADGE: Record<string, string> = {
+  normal:       'bg-slate-100 text-slate-600',
+  priority_24h: 'bg-orange-100 text-orange-700',
+  priority_48h: 'bg-yellow-100 text-yellow-700',
+  same_day:     'bg-red-100 text-red-700',
+}
+
+const PRIORITY_LABEL: Record<string, string> = {
+  normal: 'Normal', priority_24h: '24h', priority_48h: '48h', same_day: 'STAT',
 }
 
 function ReviewRow({ st }: { st: SampleTest }) {
@@ -52,6 +71,15 @@ function ReviewRow({ st }: { st: SampleTest }) {
   const [rejecting, startReject]  = useTransition()
   const [rejectNote, setRejectNote] = useState('')
   const [showReject, setShowReject] = useState(false)
+
+  const order = st.samples?.orders ?? null
+  const state = workflowState({
+    status: st.status,
+    returned_at: st.returned_at,
+    assigned_reviewer_id: st.assigned_reviewer_id,
+    order_released_at: order?.released_at,
+  })
+  const overdue = isOverdue(order?.date_due) && state === 'in_review'
 
   function handleApprove() {
     startApprove(async () => {
@@ -68,7 +96,7 @@ function ReviewRow({ st }: { st: SampleTest }) {
     startReject(async () => {
       try {
         await rejectToAnalyst(st.id, rejectNote)
-        toast.success('Sent back to analyst')
+        toast.success('Returned to the analyst')
         setShowReject(false)
         setRejectNote('')
       } catch (err: any) {
@@ -78,9 +106,7 @@ function ReviewRow({ st }: { st: SampleTest }) {
   }
 
   const displayResult = st.qualifier === 'ND' ? 'ND' : [st.qualifier, st.result].filter(Boolean).join(' ') || '—'
-  const analystName = st.entered_by_profile
-    ? [st.entered_by_profile.first_name, st.entered_by_profile.last_name].filter(Boolean).join(' ') || st.entered_by_profile.email
-    : '—'
+  const noteTooShort = rejectNote.trim().length < MIN_COMMENT_LENGTH
 
   return (
     <>
@@ -95,22 +121,35 @@ function ReviewRow({ st }: { st: SampleTest }) {
         <td className="px-3 py-3">
           <span className="font-medium text-slate-900 text-sm">{displayResult}</span>
           {st.unit && <span className="text-slate-400 text-xs ml-1">{st.unit}</span>}
+          <div className="text-xs text-slate-400 mt-0.5">
+            MDL {st.mdl || '—'} · DF {st.dilution_factor ?? 1}
+          </div>
         </td>
-        <td className="px-3 py-3 text-sm text-slate-500">{st.mdl || '—'}</td>
-        <td className="px-3 py-3 text-sm text-slate-500">{st.dilution_factor ?? 1}</td>
         <td className="px-3 py-3 text-xs text-slate-500 max-w-48">
-          {st.analyst_notes ? (
-            <span className="italic">{st.analyst_notes}</span>
-          ) : '—'}
+          {st.analyst_notes ? <span className="italic">{st.analyst_notes}</span> : '—'}
         </td>
-        <td className="px-3 py-3 text-xs text-slate-500">{analystName}</td>
+        <td className="px-3 py-3 text-xs text-slate-500">{personName(st.entered_by_profile)}</td>
+        <td className="px-3 py-3 text-xs text-slate-500">{personName(st.assigned_reviewer_profile)}</td>
         <td className="px-3 py-3">
-          <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATUS_BADGE[st.status] ?? ''}`}>
-            {st.status}
+          <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${WORKFLOW_BADGE[state]}`}>
+            {WORKFLOW_LABEL[state]}
           </span>
+          {(st.review_round ?? 1) > 1 && (
+            <div className="text-[11px] text-slate-400 mt-1">Round {st.review_round}</div>
+          )}
+        </td>
+        <td className="px-3 py-3 text-xs">
+          <span className={overdue ? 'text-red-600 font-semibold' : 'text-slate-500'}>
+            {waitingTime(st.entered_at)}
+          </span>
+          {overdue && (
+            <div className="text-[11px] text-red-500 flex items-center gap-0.5 mt-0.5">
+              <AlertTriangle className="w-3 h-3" /> Past due
+            </div>
+          )}
         </td>
         <td className="px-3 py-3 w-48">
-          {st.status === 'reviewed' && (
+          {state === 'in_review' && (
             <div className="flex gap-1.5">
               <button onClick={handleApprove} disabled={approving}
                 className="flex items-center gap-1 bg-green-600 hover:bg-green-500 disabled:bg-green-300 text-white text-xs font-medium px-3 py-1.5 rounded-lg transition">
@@ -120,38 +159,59 @@ function ReviewRow({ st }: { st: SampleTest }) {
               <button onClick={() => setShowReject(v => !v)}
                 className="flex items-center gap-1 bg-red-50 hover:bg-red-100 text-red-600 text-xs font-medium px-3 py-1.5 rounded-lg transition border border-red-200">
                 <XCircle className="w-3 h-3" />
-                Reject
+                Return
               </button>
             </div>
           )}
-          {st.status === 'entered' && (
-            <span className="text-xs text-slate-400">Awaiting analyst submit</span>
+          {(state === 'awaiting_review' || state === 'returned') && (
+            <span className="text-xs text-slate-400">With the analyst</span>
           )}
-          {st.status === 'approved' && (
+          {(state === 'approved' || state === 'released') && (
             <span className="text-xs text-green-600 flex items-center gap-1">
-              <CheckCircle2 className="w-3 h-3" /> Approved
+              <CheckCircle2 className="w-3 h-3" /> {WORKFLOW_LABEL[state]}
             </span>
           )}
         </td>
       </tr>
+
+      {/* Previous return on this result — review history is not erased when
+          the analyst re-submits, so the reviewer can see what was already
+          raised once. */}
+      {st.rejection_reason && (
+        <tr className="border-b border-slate-100 bg-amber-50">
+          <td colSpan={8} className="px-4 py-2">
+            <div className="flex items-start gap-2 text-xs">
+              <Undo2 className="w-3.5 h-3.5 text-amber-600 mt-0.5 shrink-0" />
+              <div>
+                <span className="font-semibold text-amber-800">
+                  Previously returned by {personName(st.returned_by_profile)}:
+                </span>{' '}
+                <span className="text-amber-900">{st.rejection_reason}</span>
+              </div>
+            </div>
+          </td>
+        </tr>
+      )}
+
       {showReject && (
         <tr className="border-b border-slate-100 bg-red-50">
           <td colSpan={8} className="px-4 py-3">
             <div className="flex items-center gap-3">
-              <span className="text-sm font-medium text-red-700">Rejection note:</span>
+              <span className="text-sm font-medium text-red-700 shrink-0">Reason for return:</span>
               <input
                 value={rejectNote}
                 onChange={e => setRejectNote(e.target.value)}
-                placeholder="Explain what needs to be corrected…"
+                placeholder={`Explain what needs to be corrected (min ${MIN_COMMENT_LENGTH} characters)…`}
                 className="flex-1 bg-white border border-red-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-red-400"
               />
-              <button onClick={handleReject} disabled={rejecting}
-                className="bg-red-600 hover:bg-red-500 disabled:bg-red-300 text-white text-xs font-medium px-4 py-2 rounded-lg transition flex items-center gap-1">
+              <button onClick={handleReject} disabled={rejecting || noteTooShort}
+                title={noteTooShort ? `At least ${MIN_COMMENT_LENGTH} characters are required` : undefined}
+                className="bg-red-600 hover:bg-red-500 disabled:bg-red-300 text-white text-xs font-medium px-4 py-2 rounded-lg transition flex items-center gap-1 shrink-0">
                 {rejecting ? <Loader2 className="w-3 h-3 animate-spin" /> : null}
                 {rejecting ? 'Sending…' : 'Send back'}
               </button>
               <button onClick={() => setShowReject(false)}
-                className="text-slate-400 hover:text-slate-600 text-xs">Cancel</button>
+                className="text-slate-400 hover:text-slate-600 text-xs shrink-0">Cancel</button>
             </div>
           </td>
         </tr>
@@ -204,9 +264,10 @@ export default function ReviewQueueTable({ rows, orderBasePath = '/admin/orders'
       <div className="space-y-4">
         {groups.map(({ sampleKey, sample, tests }) => {
           const isCollapsed = collapsed.has(sampleKey)
-          const order = (sample as any)?.orders as SampleTest['samples'] extends null ? null : NonNullable<SampleTest['samples']>['orders']
-          const reviewedCount = tests.filter(t => t.status === 'reviewed').length
+          const order = sample?.orders ?? null
+          const inReviewCount = tests.filter(t => t.status === 'reviewed').length
           const approvedCount = tests.filter(t => t.status === 'approved').length
+          const overdue = isOverdue(order?.date_due) && inReviewCount > 0
 
           return (
             <div key={sampleKey} className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
@@ -217,25 +278,43 @@ export default function ReviewQueueTable({ rows, orderBasePath = '/admin/orders'
                   : <ChevronDown className="w-4 h-4 text-slate-400 flex-shrink-0" />
                 }
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-3 flex-wrap">
+                    {order?.order_number && (
+                      <span className="text-xs font-mono bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">{order.order_number}</span>
+                    )}
                     <span className="font-semibold text-slate-900 font-mono">{sample?.sample_id}</span>
                     {sample?.description && <span className="text-slate-500 text-sm truncate">{sample.description}</span>}
                     {sample?.matrix_type && (
                       <span className="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">{sample.matrix_type}</span>
                     )}
+                    {order?.priority && order.priority !== 'normal' && (
+                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${PRIORITY_BADGE[order.priority] ?? ''}`}>
+                        {PRIORITY_LABEL[order.priority]}
+                      </span>
+                    )}
+                    {overdue && (
+                      <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-red-100 text-red-700 flex items-center gap-1">
+                        <AlertTriangle className="w-3 h-3" /> Overdue
+                      </span>
+                    )}
                   </div>
                   <div className="flex items-center gap-4 mt-1 text-xs text-slate-400">
-                    {(order as any)?.clients?.client_name && <span>{(order as any).clients.client_name}</span>}
-                    {(order as any)?.id && (
-                      <a href={`${orderBasePath}/${(order as any).id}`} onClick={e => e.stopPropagation()}
+                    {order?.clients?.client_name && <span>{order.clients.client_name}</span>}
+                    {order?.date_due && (
+                      <span className={overdue ? 'text-red-500 font-medium' : ''}>
+                        Due: {new Date(order.date_due).toLocaleDateString()}
+                      </span>
+                    )}
+                    {order?.id && (
+                      <a href={`${orderBasePath}/${order.id}`} onClick={e => e.stopPropagation()}
                         className="text-blue-500 hover:underline">View order</a>
                     )}
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  {reviewedCount > 0 && (
+                  {inReviewCount > 0 && (
                     <span className="text-xs bg-blue-50 text-blue-700 border border-blue-200 px-2 py-0.5 rounded-full">
-                      {reviewedCount} to review
+                      {inReviewCount} to review
                     </span>
                   )}
                   {approvedCount > 0 && (
@@ -254,11 +333,11 @@ export default function ReviewQueueTable({ rows, orderBasePath = '/admin/orders'
                       <tr className="border-b border-slate-100 bg-slate-50">
                         <th className="text-left px-4 py-2 text-xs font-semibold text-slate-500 uppercase tracking-wide">Test</th>
                         <th className="text-left px-3 py-2 text-xs font-semibold text-slate-500 uppercase tracking-wide">Result</th>
-                        <th className="text-left px-3 py-2 text-xs font-semibold text-slate-500 uppercase tracking-wide">MDL</th>
-                        <th className="text-left px-3 py-2 text-xs font-semibold text-slate-500 uppercase tracking-wide">Dilution</th>
-                        <th className="text-left px-3 py-2 text-xs font-semibold text-slate-500 uppercase tracking-wide">Notes</th>
+                        <th className="text-left px-3 py-2 text-xs font-semibold text-slate-500 uppercase tracking-wide">Analyst notes</th>
                         <th className="text-left px-3 py-2 text-xs font-semibold text-slate-500 uppercase tracking-wide">Analyst</th>
+                        <th className="text-left px-3 py-2 text-xs font-semibold text-slate-500 uppercase tracking-wide">Reviewer</th>
                         <th className="text-left px-3 py-2 text-xs font-semibold text-slate-500 uppercase tracking-wide">Status</th>
+                        <th className="text-left px-3 py-2 text-xs font-semibold text-slate-500 uppercase tracking-wide">Waiting</th>
                         <th className="px-3 py-2" />
                       </tr>
                     </thead>
