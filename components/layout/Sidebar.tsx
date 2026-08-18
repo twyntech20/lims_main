@@ -45,6 +45,8 @@ const ADMIN_NAV: NavGroup[] = [
   { label: 'Management', items: [
     { label: 'Clients',      href: '/admin/clients',       icon: Briefcase },
     { label: 'Projects',     href: '/admin/projects',      icon: FolderOpen },
+  ]},
+  { label: 'Reporting', items: [
     { label: 'Reports',      href: '/admin/reports',       icon: FileText },
   ]},
   { label: 'Quality', items: [
