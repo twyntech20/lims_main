@@ -6,9 +6,9 @@ import { createClient } from '@/lib/supabase/client'
 import { cn } from '@/lib/utils'
 import {
   LayoutDashboard, ClipboardList, FlaskConical, FolderOpen, BarChart3,
-  Briefcase, Users, FileText, Activity, Bell, Layers, ClipboardCheck,
-  GitPullRequestArrow, FileEdit, ScrollText, LogOut, ChevronLeft, ChevronRight,
-  TestTube, Inbox, UserCircle
+  Briefcase, Users, FileText, Bell, Layers, ClipboardCheck,
+  GitPullRequestArrow, FileEdit, ScrollText, LogOut, PanelLeftClose,
+  PanelLeftOpen, TestTube, Inbox, UserCircle, Settings, Menu, X,
 } from 'lucide-react'
 import { useState } from 'react'
 import Image from 'next/image'
@@ -18,44 +18,66 @@ interface NavItem {
   label: string
   href: string
   icon: React.ElementType
+  /** Renders the unread count from the layout. */
+  badge?: 'notifications'
 }
 
-const ADMIN_NAV: NavItem[] = [
-  { label: 'Dashboard',    href: '/admin/dashboard',     icon: LayoutDashboard },
-  { label: 'Orders',       href: '/admin/orders',         icon: ClipboardList },
-  { label: 'Samples',      href: '/admin/samples',        icon: FlaskConical },
-  { label: 'Projects',     href: '/admin/projects',       icon: FolderOpen },
-  { label: 'Results',      href: '/admin/results',        icon: BarChart3 },
-  { label: 'Work Queue',   href: '/admin/work-queue',     icon: Inbox },
-  { label: 'Review Queue', href: '/admin/review-queue',   icon: ClipboardCheck },
-  { label: 'Notifications', href: '/admin/notifications', icon: Bell },
-  { label: 'Amendments',   href: '/admin/amendments',     icon: GitPullRequestArrow },
-  { label: 'Tests',        href: '/admin/tests',          icon: TestTube },
-  { label: 'Clients',      href: '/admin/clients',        icon: Briefcase },
-  { label: 'Worksheets',   href: '/admin/worksheets',     icon: Layers },
-  { label: 'Users',        href: '/admin/users',          icon: Users },
-  { label: 'Reports',      href: '/admin/reports',        icon: FileText },
-  { label: 'Form Builder', href: '/admin/form-builder',   icon: FileEdit },
-  { label: 'System Logs',  href: '/admin/system-logs',    icon: ScrollText },
+interface NavGroup {
+  label: string
+  items: NavItem[]
+}
+
+/* Routes are unchanged — only their grouping and presentation. */
+
+const ADMIN_NAV: NavGroup[] = [
+  { label: 'Operations', items: [
+    { label: 'Dashboard',    href: '/admin/dashboard',     icon: LayoutDashboard },
+    { label: 'Orders',       href: '/admin/orders',        icon: ClipboardList },
+    { label: 'Samples',      href: '/admin/samples',       icon: FlaskConical },
+    { label: 'Work Queue',   href: '/admin/work-queue',    icon: Inbox },
+    { label: 'Review Queue', href: '/admin/review-queue',  icon: ClipboardCheck },
+  ]},
+  { label: 'Laboratory', items: [
+    { label: 'Test Catalog', href: '/admin/tests',         icon: TestTube },
+    { label: 'Worksheets',   href: '/admin/worksheets',    icon: Layers },
+    { label: 'Results',      href: '/admin/results',       icon: BarChart3 },
+  ]},
+  { label: 'Management', items: [
+    { label: 'Clients',      href: '/admin/clients',       icon: Briefcase },
+    { label: 'Projects',     href: '/admin/projects',      icon: FolderOpen },
+    { label: 'Reports',      href: '/admin/reports',       icon: FileText },
+  ]},
+  { label: 'Quality', items: [
+    { label: 'Amendments',   href: '/admin/amendments',    icon: GitPullRequestArrow },
+    { label: 'Audit Log',    href: '/admin/system-logs',   icon: ScrollText },
+  ]},
+  { label: 'Administration', items: [
+    { label: 'Users',        href: '/admin/users',         icon: Users },
+    { label: 'Settings',     href: '/admin/settings',      icon: Settings },
+    { label: 'Form Builder', href: '/admin/form-builder',  icon: FileEdit },
+  ]},
 ]
 
-// No separate "Results" route — approved results live in the Work Queue's
-// own Approved tab (app/analyst/work-queue/page.tsx) rather than a
-// duplicate page, so there's nothing else to link to here.
-const ANALYST_NAV: NavItem[] = [
-  { label: 'Dashboard',    href: '/analyst/dashboard',    icon: LayoutDashboard },
-  { label: 'Work Queue',   href: '/analyst/work-queue',   icon: Inbox },
-  { label: 'Review Queue', href: '/analyst/review-queue', icon: ClipboardCheck },
-  { label: 'Notifications', href: '/analyst/notifications', icon: Bell },
+const ANALYST_NAV: NavGroup[] = [
+  { label: 'Operations', items: [
+    { label: 'Dashboard',    href: '/analyst/dashboard',    icon: LayoutDashboard },
+    { label: 'Work Queue',   href: '/analyst/work-queue',   icon: Inbox },
+    { label: 'Review Queue', href: '/analyst/review-queue', icon: ClipboardCheck },
+  ]},
+  { label: 'Activity', items: [
+    { label: 'Notifications', href: '/analyst/notifications', icon: Bell, badge: 'notifications' },
+  ]},
 ]
 
-const CLIENT_NAV: NavItem[] = [
-  { label: 'Dashboard',    href: '/client/dashboard',     icon: LayoutDashboard },
-  { label: 'My Orders',    href: '/client/orders',        icon: ClipboardList },
-  { label: 'New Order',    href: '/client/orders/new',    icon: ClipboardCheck },
+const CLIENT_NAV: NavGroup[] = [
+  { label: 'Portal', items: [
+    { label: 'Dashboard', href: '/client/dashboard',  icon: LayoutDashboard },
+    { label: 'My Orders', href: '/client/orders',     icon: ClipboardList },
+    { label: 'New Order', href: '/client/orders/new', icon: ClipboardCheck },
+  ]},
 ]
 
-const NAV_BY_ROLE: Record<UserRole, NavItem[]> = {
+const NAV_BY_ROLE: Record<UserRole, NavGroup[]> = {
   admin: ADMIN_NAV,
   manager: ADMIN_NAV,
   analyst: ANALYST_NAV,
@@ -73,9 +95,20 @@ export default function Sidebar({ role, userName, unreadCount = 0, canReview = f
   const pathname = usePathname()
   const router = useRouter()
   const [collapsed, setCollapsed] = useState(false)
-  const nav = (NAV_BY_ROLE[role] ?? []).filter(
-    item => !(role === 'analyst' && item.href === '/analyst/review-queue' && !canReview)
+  const [mobileOpen, setMobileOpen] = useState(false)
+
+  // Admins get the notifications entry inside Quality-adjacent nav; it is
+  // appended here so the shared group definition stays declarative.
+  const groups = (NAV_BY_ROLE[role] ?? []).map(g =>
+    role !== 'analyst' && g.label === 'Quality'
+      ? { ...g, items: [...g.items, { label: 'Notifications', href: '/admin/notifications', icon: Bell, badge: 'notifications' as const }] }
+      : g,
   )
+
+  // An analyst without review rights has no Review Queue to open.
+  const visibleGroups = groups
+    .map(g => ({ ...g, items: g.items.filter(i => !(role === 'analyst' && i.href === '/analyst/review-queue' && !canReview)) }))
+    .filter(g => g.items.length > 0)
 
   async function handleSignOut() {
     const supabase = createClient()
@@ -83,95 +116,182 @@ export default function Sidebar({ role, userName, unreadCount = 0, canReview = f
     router.push('/login')
   }
 
-  return (
-    <aside className={cn(
-      'relative flex flex-col h-screen bg-white border-r border-gray-200 transition-all duration-300 shrink-0',
-      collapsed ? 'w-14' : 'w-[280px]'
-    )}>
-      {/* Header */}
-      <div className="flex items-center justify-between px-3 py-4 border-b border-gray-100">
-        {!collapsed && (
-          <div className="flex flex-col items-center w-full">
-            <Image
-              src="https://fqlabs.com/wp-content/uploads/2020/01/weblogo.png"
-              alt="FQLabs"
-              width={220}
-              height={84}
-              style={{ objectFit: 'contain' }}
-              unoptimized
-              priority
-            />
-            <p className="text-[11px] font-bold text-gray-600 tracking-wide uppercase text-center mt-1 leading-tight">
-              Laboratory Information System
+  function isActive(href: string) {
+    return pathname === href || pathname.startsWith(href + '/')
+  }
+
+  const initials = userName
+    .split(/\s+/).filter(Boolean).slice(0, 2).map(p => p[0]?.toUpperCase()).join('') || 'U'
+
+  const nav = (
+    <nav className="flex-1 overflow-y-auto px-2 py-3">
+      {visibleGroups.map(group => (
+        <div key={group.label} className="mb-4 last:mb-0">
+          {!collapsed && (
+            <p className="px-2 pb-1.5 text-[10px] font-semibold uppercase tracking-[0.09em] text-ink-4">
+              {group.label}
             </p>
-          </div>
+          )}
+          <ul className="space-y-0.5">
+            {group.items.map(item => {
+              const active = isActive(item.href)
+              const showBadge = item.badge === 'notifications' && unreadCount > 0
+              return (
+                <li key={item.href}>
+                  <Link
+                    href={item.href}
+                    onClick={() => setMobileOpen(false)}
+                    title={collapsed ? item.label : undefined}
+                    aria-current={active ? 'page' : undefined}
+                    className={cn(
+                      'group relative flex items-center gap-2.5 rounded-md px-2 py-1.5 text-[13px] transition-colors',
+                      active
+                        ? 'bg-brand-50 font-medium text-brand-700'
+                        : 'text-ink-2 hover:bg-surface-sunken hover:text-ink',
+                      collapsed && 'justify-center px-0',
+                    )}
+                  >
+                    {/* Active marker is a shape, not only a colour. */}
+                    {active && (
+                      <span className="absolute left-0 top-1/2 h-4 w-0.5 -translate-y-1/2 rounded-r bg-brand-600" />
+                    )}
+                    <item.icon className={cn('h-4 w-4 shrink-0', active ? 'text-brand-600' : 'text-ink-4 group-hover:text-ink-3')} />
+                    {!collapsed && <span className="truncate">{item.label}</span>}
+                    {!collapsed && showBadge && (
+                      <span className="ml-auto rounded-full bg-crit-fg px-1.5 py-px text-[10px] font-semibold tabular text-white">
+                        {unreadCount > 9 ? '9+' : unreadCount}
+                      </span>
+                    )}
+                    {collapsed && showBadge && (
+                      <span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-crit-fg" />
+                    )}
+                  </Link>
+                </li>
+              )
+            })}
+          </ul>
+        </div>
+      ))}
+    </nav>
+  )
+
+  const profileHref = role === 'analyst' ? '/analyst/dashboard' : '/admin/profile'
+
+  const shell = (
+    <>
+      {/* Brand */}
+      <div className={cn('flex h-14 items-center gap-2 border-b border-line px-3', collapsed && 'justify-center px-0')}>
+        {collapsed ? (
+          <span className="flex h-7 w-7 items-center justify-center rounded-md bg-brand-600 text-[12px] font-bold text-white">
+            FQ
+          </span>
+        ) : (
+          <Image
+            src="https://fqlabs.com/wp-content/uploads/2020/01/weblogo.png"
+            alt="FQLabs"
+            width={124}
+            height={30}
+            style={{ objectFit: 'contain', height: 'auto' }}
+            unoptimized
+            priority
+          />
         )}
         <button
-          onClick={() => setCollapsed(!collapsed)}
-          className="ml-auto p-1 rounded text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition shrink-0"
+          onClick={() => setCollapsed(v => !v)}
+          className="ml-auto hidden rounded-md p-1 text-ink-4 transition-colors hover:bg-surface-sunken hover:text-ink-2 lg:block"
+          aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
         >
-          {collapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
+          {collapsed ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
         </button>
       </div>
 
-      {/* Nav */}
-      <nav className="flex-1 py-2 overflow-y-auto">
-        {nav.map(item => {
-          const active = pathname.startsWith(item.href)
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              title={collapsed ? item.label : undefined}
-              className={cn(
-                'flex items-center gap-2.5 px-3 py-2 text-sm transition-colors mx-1 rounded',
-                active
-                  ? 'bg-blue-600 text-white font-medium'
-                  : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
-              )}
-            >
-              <item.icon className="w-4 h-4 shrink-0" />
-              {!collapsed && <span className="truncate">{item.label}</span>}
-              {!collapsed && unreadCount > 0 && item.href.includes('notification') && (
-                <span className="ml-auto bg-red-500 text-white text-xs rounded-full w-4 h-4 flex items-center justify-center font-bold">
-                  {unreadCount > 9 ? '9+' : unreadCount}
-                </span>
-              )}
-            </Link>
-          )
-        })}
-      </nav>
+      {nav}
 
-      {/* Logout */}
-      <div className="border-t border-gray-100 p-2">
-        {!collapsed && (
-          <p className="text-xs text-gray-400 px-3 py-1 truncate">{userName}</p>
-        )}
-        {/* Profile link — only for admin/manager roles */}
-        {(role === 'admin' || role === 'manager') && (
-          <Link
-            href="/admin/profile"
-            title={collapsed ? 'Profile' : undefined}
-            className={cn(
-              'w-full flex items-center gap-2.5 px-3 py-2 text-sm rounded transition mx-auto mb-1',
-              pathname.startsWith('/admin/profile')
-                ? 'bg-blue-600 text-white font-medium'
-                : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
-            )}
-          >
-            <UserCircle className="w-4 h-4 shrink-0" />
-            {!collapsed && <span>Profile</span>}
-          </Link>
-        )}
+      {/* User */}
+      <div className="border-t border-line p-2">
+        <Link
+          href={profileHref}
+          className={cn(
+            'flex items-center gap-2.5 rounded-md px-2 py-1.5 transition-colors hover:bg-surface-sunken',
+            collapsed && 'justify-center px-0',
+          )}
+          title={collapsed ? userName : undefined}
+        >
+          <span className="flex h-6.5 w-6.5 shrink-0 items-center justify-center rounded-full bg-brand-600 text-[10px] font-semibold text-white">
+            {initials}
+          </span>
+          {!collapsed && (
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-[12px] font-medium text-ink">{userName}</span>
+              <span className="block text-[11px] capitalize text-ink-4">{role}</span>
+            </span>
+          )}
+          {!collapsed && <UserCircle className="h-3.5 w-3.5 shrink-0 text-ink-4" />}
+        </Link>
         <button
           onClick={handleSignOut}
-          title={collapsed ? 'Logout' : undefined}
-          className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-red-500 hover:bg-red-50 hover:text-red-600 rounded transition mx-auto"
+          title={collapsed ? 'Sign out' : undefined}
+          className={cn(
+            'mt-0.5 flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-[13px] text-ink-3 transition-colors hover:bg-crit-bg hover:text-crit-fg',
+            collapsed && 'justify-center px-0',
+          )}
         >
-          <LogOut className="w-4 h-4 shrink-0" />
-          {!collapsed && <span>Logout</span>}
+          <LogOut className="h-4 w-4 shrink-0" />
+          {!collapsed && <span>Sign out</span>}
         </button>
       </div>
-    </aside>
+    </>
+  )
+
+  return (
+    <>
+      {/* Mobile top bar */}
+      <div className="flex h-12 shrink-0 items-center gap-2 border-b border-line bg-surface px-3 lg:hidden">
+        <button
+          onClick={() => setMobileOpen(true)}
+          className="rounded-md p-1.5 text-ink-2 transition-colors hover:bg-surface-sunken"
+          aria-label="Open navigation"
+        >
+          <Menu className="h-5 w-5" />
+        </button>
+        <span className="text-[13px] font-semibold text-ink">FQLabs LIMS</span>
+        {unreadCount > 0 && (
+          <span className="ml-auto rounded-full bg-crit-fg px-1.5 py-px text-[10px] font-semibold tabular text-white">
+            {unreadCount > 9 ? '9+' : unreadCount}
+          </span>
+        )}
+      </div>
+
+      {/* Mobile drawer */}
+      {mobileOpen && (
+        <div className="fixed inset-0 z-50 lg:hidden">
+          <div
+            className="absolute inset-0 bg-ink/35"
+            onClick={() => setMobileOpen(false)}
+            aria-hidden="true"
+          />
+          <aside className="absolute inset-y-0 left-0 flex w-[264px] flex-col bg-surface shadow-pop">
+            <button
+              onClick={() => setMobileOpen(false)}
+              className="absolute right-2 top-3.5 rounded-md p-1 text-ink-4 hover:bg-surface-sunken"
+              aria-label="Close navigation"
+            >
+              <X className="h-4 w-4" />
+            </button>
+            {shell}
+          </aside>
+        </div>
+      )}
+
+      {/* Desktop rail */}
+      <aside
+        className={cn(
+          'hidden h-screen shrink-0 flex-col border-r border-line bg-surface transition-[width] duration-200 lg:flex',
+          collapsed ? 'w-[60px]' : 'w-[228px]',
+        )}
+      >
+        {shell}
+      </aside>
+    </>
   )
 }

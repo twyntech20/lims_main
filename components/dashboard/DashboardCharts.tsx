@@ -1,10 +1,9 @@
 'use client'
 
 import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
-  LineChart, Line, ResponsiveContainer
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
+  LineChart, Line, ResponsiveContainer,
 } from 'recharts'
-import { Inbox } from 'lucide-react'
 
 interface Props {
   statusData: { name: string; Orders: number }[]
@@ -12,56 +11,67 @@ interface Props {
   periodLabel: string
 }
 
-export default function DashboardCharts({ statusData, timelineData, periodLabel }: Props) {
-  return (
-    <div className="grid grid-cols-2 gap-4">
-      {/* Status distribution */}
-      <div className="bg-white rounded-lg border border-gray-200 p-5 shadow-sm">
-        <h2 className="font-semibold text-gray-700 mb-4">Order Status Distribution ({periodLabel})</h2>
-        {statusData.length > 0 ? (
-          <ResponsiveContainer width="100%" height={260}>
-            <BarChart data={statusData} margin={{ top: 5, right: 10, left: -20, bottom: 5 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-              <XAxis dataKey="name" tick={{ fontSize: 12, fill: '#6b7280' }} />
-              <YAxis tick={{ fontSize: 12, fill: '#6b7280' }} allowDecimals={false} />
-              <Tooltip contentStyle={{ fontSize: 12, borderRadius: 8 }} />
-              <Legend wrapperStyle={{ fontSize: 12 }} />
-              <Bar dataKey="Orders" fill="#4f9cf9" radius={[4, 4, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
-        ) : (
-          <EmptyChart label="No order data for the selected time period" />
-        )}
-      </div>
+/* One measure, one series, one hue — so no legend is needed and the
+   title names what is plotted. Grid and axes stay recessive; the marks
+   carry the data. */
+const BRAND = '#1a56db'
+const GRID  = '#eceef2'
+const AXIS  = '#98a2b3'
 
-      {/* Timeline */}
-      <div className="bg-white rounded-lg border border-gray-200 p-5 shadow-sm">
-        <h2 className="font-semibold text-gray-700 mb-4">Order Timeline ({periodLabel})</h2>
-        {timelineData.length > 0 ? (
-          <ResponsiveContainer width="100%" height={260}>
-            <LineChart data={timelineData} margin={{ top: 5, right: 10, left: -20, bottom: 5 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-              <XAxis dataKey="date" tick={{ fontSize: 11, fill: '#6b7280' }} />
-              <YAxis tick={{ fontSize: 12, fill: '#6b7280' }} allowDecimals={false} />
-              <Tooltip contentStyle={{ fontSize: 12, borderRadius: 8 }} />
-              <Legend wrapperStyle={{ fontSize: 12 }} />
-              <Line type="monotone" dataKey="Orders" stroke="#4f9cf9" strokeWidth={2} dot={{ r: 3 }} />
-            </LineChart>
-          </ResponsiveContainer>
-        ) : (
-          <EmptyChart label="No order activity for the selected time period" />
-        )}
-      </div>
+const AXIS_TICK = { fontSize: 11, fill: AXIS }
+
+const TOOLTIP_STYLE = {
+  fontSize: 12,
+  borderRadius: 7,
+  border: '1px solid #e6e8ec',
+  boxShadow: '0 12px 28px -6px rgb(16 24 40 / 0.16)',
+  padding: '6px 10px',
+} as const
+
+function ChartFrame({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="rounded-lg border border-line bg-surface p-4 shadow-xs">
+      <h3 className="mb-3 text-[13px] font-medium text-ink">{title}</h3>
+      {children}
     </div>
   )
 }
 
-function EmptyChart({ label }: { label: string }) {
+export default function DashboardCharts({ statusData, timelineData, periodLabel }: Props) {
   return (
-    <div className="h-64 flex flex-col items-center justify-center text-gray-300">
-      <Inbox className="w-12 h-12 mb-3" />
-      <p className="text-sm text-gray-400 font-medium">No Order Timeline</p>
-      <p className="text-xs text-gray-300 mt-1">{label}</p>
+    <div className="grid gap-3 lg:grid-cols-2">
+      {statusData.length > 0 && (
+        <ChartFrame title={`Orders by status · ${periodLabel}`}>
+          <ResponsiveContainer width="100%" height={230}>
+            <BarChart data={statusData} margin={{ top: 4, right: 8, left: -22, bottom: 0 }}>
+              <CartesianGrid stroke={GRID} vertical={false} />
+              <XAxis dataKey="name" tick={AXIS_TICK} tickLine={false} axisLine={{ stroke: GRID }} />
+              <YAxis tick={AXIS_TICK} tickLine={false} axisLine={false} allowDecimals={false} width={40} />
+              <Tooltip contentStyle={TOOLTIP_STYLE} cursor={{ fill: 'rgba(26,86,219,0.05)' }} />
+              {/* Thin bars, 4px rounded top anchored to the baseline. */}
+              <Bar dataKey="Orders" fill={BRAND} radius={[4, 4, 0, 0]} maxBarSize={34} />
+            </BarChart>
+          </ResponsiveContainer>
+        </ChartFrame>
+      )}
+
+      {timelineData.length > 0 && (
+        <ChartFrame title={`Orders received · ${periodLabel}`}>
+          <ResponsiveContainer width="100%" height={230}>
+            <LineChart data={timelineData} margin={{ top: 4, right: 8, left: -22, bottom: 0 }}>
+              <CartesianGrid stroke={GRID} vertical={false} />
+              <XAxis dataKey="date" tick={AXIS_TICK} tickLine={false} axisLine={{ stroke: GRID }} />
+              <YAxis tick={AXIS_TICK} tickLine={false} axisLine={false} allowDecimals={false} width={40} />
+              <Tooltip contentStyle={TOOLTIP_STYLE} cursor={{ stroke: BRAND, strokeWidth: 1, strokeDasharray: '3 3' }} />
+              <Line
+                type="monotone" dataKey="Orders" stroke={BRAND} strokeWidth={2}
+                dot={{ r: 2.5, fill: BRAND, strokeWidth: 0 }}
+                activeDot={{ r: 4.5, fill: BRAND, stroke: '#fff', strokeWidth: 2 }}
+              />
+            </LineChart>
+          </ResponsiveContainer>
+        </ChartFrame>
+      )}
     </div>
   )
 }

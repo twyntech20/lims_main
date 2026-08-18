@@ -1,15 +1,21 @@
 import { createClient } from '@/lib/supabase/server'
-import Link from 'next/link'
-import { ClipboardList, FlaskConical } from 'lucide-react'
+import { redirect } from 'next/navigation'
+import { ClipboardCheck, Filter } from 'lucide-react'
 import WorkQueueTable from '@/components/work-queue/WorkQueueTable'
 import { RESULT_QUEUE_SELECT, REVIEWER_SELECT } from '@/lib/queries/result-queue'
-import { workflowState, type WorkflowState } from '@/lib/workflow'
+import { workflowState, isOverdue, type WorkflowState } from '@/lib/workflow'
+import {
+  Page, PageHeader, Tabs, Toolbar, Select, SearchField, ButtonLink, buttonClass,
+} from '@/components/ui/primitives'
 
-interface SearchParams { status?: string; analyst?: string; category?: string; priority?: string }
+interface SearchParams {
+  status?: string; analyst?: string; reviewer?: string
+  category?: string; priority?: string; due?: string; q?: string
+}
 interface Props { searchParams: Promise<SearchParams> }
 
-// Queue tabs are workflow states, not raw statuses — "returned for changes"
-// and "released" are the two the enum cannot express on its own.
+/* Tabs are workflow states, not raw statuses — "returned for changes"
+   and "released" are the two the enum cannot express on its own. */
 const TAB_STATE: Record<string, WorkflowState> = {
   pending:  'awaiting_entry',
   entered:  'awaiting_review',
@@ -20,14 +26,16 @@ const TAB_STATE: Record<string, WorkflowState> = {
 }
 
 export default async function WorkQueuePage({ searchParams }: Props) {
-  const { status, analyst, category, priority } = await searchParams
+  const sp = await searchParams
+  const { status, analyst, reviewer, category, priority, due, q } = sp
   const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) redirect('/login')
 
-  // Fetch analysts for filter dropdown
-  const { data: analysts } = await supabase
+  const { data: staff } = await supabase
     .from('profiles')
     .select('id, first_name, last_name, email')
-    .in('role', ['analyst', 'admin', 'supervisor'])
+    .in('role', ['analyst', 'admin', 'manager'])
     .order('first_name')
 
   // Reviewers available to assign to — matches the authorization check in
@@ -47,7 +55,7 @@ export default async function WorkQueuePage({ searchParams }: Props) {
   if (category) query = query.eq('tests.category', category)
 
   const { data: sampleTests } = await query
-  const allData = (sampleTests ?? []) as any[]
+  const all = (sampleTests ?? []) as any[]
 
   const stateOf = (st: any): WorkflowState => workflowState({
     status: st.status,
@@ -56,109 +64,136 @@ export default async function WorkQueuePage({ searchParams }: Props) {
     order_released_at: st.samples?.orders?.released_at,
   })
 
-  const filtered = allData.filter(st => {
-    if (status && stateOf(st) !== TAB_STATE[status]) return false
-    if (analyst && st.entered_by_profile?.email !== analyst) return false
+  const matchesFilters = (st: any) => {
+    if (analyst  && st.entered_by_profile?.id !== analyst) return false
+    if (reviewer === 'me'   && st.assigned_reviewer_id !== user.id) return false
+    if (reviewer === 'none' && st.assigned_reviewer_id) return false
+    if (reviewer && !['me', 'none'].includes(reviewer) && st.assigned_reviewer_id !== reviewer) return false
     if (priority && st.samples?.orders?.priority !== priority) return false
+    if (due === 'overdue' && !isOverdue(st.samples?.orders?.date_due)) return false
+    if (due === 'week') {
+      const d = st.samples?.orders?.date_due
+      if (!d || new Date(d).getTime() > Date.now() + 7 * 86400000) return false
+    }
+    if (q) {
+      const hay = [
+        st.samples?.orders?.order_number, st.samples?.sample_id, st.tests?.name,
+        st.tests?.code, st.samples?.orders?.clients?.client_name,
+      ].filter(Boolean).join(' ').toLowerCase()
+      if (!hay.includes(q.toLowerCase())) return false
+    }
     return true
-  })
+  }
 
-  const countState = (s: WorkflowState) => allData.filter(st => stateOf(st) === s).length
+  const scoped = all.filter(matchesFilters)
+  const isMine = (st: any) =>
+    st.entered_by_profile?.id === user.id ||
+    st.assigned_reviewer_id === user.id ||
+    st.samples?.orders?.assigned_analyst_id === user.id
+
+  const rows = status === 'mine'
+    ? scoped.filter(isMine)
+    : status
+      ? scoped.filter(st => stateOf(st) === TAB_STATE[status])
+      : scoped
+
+  const n = (s: WorkflowState) => scoped.filter(st => stateOf(st) === s).length
+  const href = (tab: string) => {
+    const p = new URLSearchParams(Object.entries(sp).filter(([k, v]) => v && k !== 'status') as [string, string][])
+    if (tab) p.set('status', tab)
+    const qs = p.toString()
+    return `/admin/work-queue${qs ? `?${qs}` : ''}`
+  }
 
   const tabs = [
-    { key: '',         label: 'All',              count: allData.length },
-    { key: 'pending',  label: 'Awaiting entry',   count: countState('awaiting_entry') },
-    { key: 'returned', label: 'Returned',         count: countState('returned') },
-    { key: 'entered',  label: 'Awaiting review',  count: countState('awaiting_review') },
-    { key: 'reviewed', label: 'In review',        count: countState('in_review') },
-    { key: 'approved', label: 'Ready to release', count: countState('approved') },
-    { key: 'released', label: 'Released',         count: countState('released') },
+    { key: '',         label: 'All',          href: href(''),         count: scoped.length,     active: !status },
+    { key: 'mine',     label: 'My work',      href: href('mine'),     count: scoped.filter(isMine).length, active: status === 'mine' },
+    { key: 'pending',  label: 'Pending',      href: href('pending'),  count: n('awaiting_entry'),  active: status === 'pending' },
+    { key: 'entered',  label: 'In progress',  href: href('entered'),  count: n('awaiting_review'), active: status === 'entered' },
+    { key: 'returned', label: 'Returned',     href: href('returned'), count: n('returned'),        active: status === 'returned' },
+    { key: 'reviewed', label: 'Review',       href: href('reviewed'), count: n('in_review'),       active: status === 'reviewed' },
+    { key: 'approved', label: 'Approved',     href: href('approved'), count: n('approved'),        active: status === 'approved' },
+    { key: 'released', label: 'Released',     href: href('released'), count: n('released'),        active: status === 'released' },
   ]
 
+  const actionable = n('awaiting_entry') + n('returned') + n('awaiting_review')
+  const hasFilters = !!(analyst || reviewer || category || priority || due || q)
+
   return (
-    <div className="p-6 max-w-7xl mx-auto">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
-            <FlaskConical className="w-6 h-6 text-blue-600" />
-            Work Queue
-          </h1>
-          <p className="text-slate-500 text-sm mt-1">
-            {countState('awaiting_entry')} to enter · {countState('returned')} returned ·{' '}
-            {countState('awaiting_review')} to assign · {countState('in_review')} in review ·{' '}
-            {countState('approved')} ready to release
-          </p>
-        </div>
-        <Link href="/admin/review-queue"
-          className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-white font-semibold px-4 py-2.5 rounded-xl transition shadow-sm text-sm">
-          <ClipboardList className="w-4 h-4" /> Review Queue
-        </Link>
+    <Page wide>
+      <PageHeader
+        title="Work Queue"
+        meta={
+          actionable === 0
+            ? 'Nothing is currently waiting on the bench.'
+            : <>{actionable} item{actionable === 1 ? '' : 's'} requiring attention · {n('in_review')} with reviewers</>
+        }
+        actions={<ButtonLink href="/admin/review-queue"><ClipboardCheck className="h-3.5 w-3.5" /> Review Queue</ButtonLink>}
+      />
+
+      <div className="mb-3">
+        <Tabs items={tabs} />
       </div>
 
-      {/* Status Tabs */}
-      <div className="flex gap-1 mb-4 bg-slate-100 rounded-xl p-1 w-fit flex-wrap">
-        {tabs.map(tab => {
-          const active = (status ?? '') === tab.key
-          return (
-            <Link key={tab.key}
-              href={`/admin/work-queue${tab.key ? `?status=${tab.key}` : ''}`}
-              className={`px-4 py-1.5 rounded-lg text-sm font-medium transition flex items-center gap-1.5 ${
-                active
-                  ? 'bg-white text-slate-900 shadow-sm'
-                  : 'text-slate-500 hover:text-slate-700'
-              }`}>
-              {tab.label}
-              <span className={`text-xs px-1.5 py-0.5 rounded-full ${
-                active ? 'bg-blue-100 text-blue-700' : 'bg-slate-200 text-slate-500'
-              }`}>{tab.count}</span>
-            </Link>
-          )
-        })}
-      </div>
+      <form>
+        {status && <input type="hidden" name="status" value={status} />}
+        <Toolbar>
+          <SearchField defaultValue={q} placeholder="Search order, sample, test or client…" />
 
-      {/* Filters */}
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 mb-6">
-        <form className="flex flex-wrap gap-3">
-          {status && <input type="hidden" name="status" value={status} />}
-          <select name="category" defaultValue={category ?? ''}
-            className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+          <Select name="priority" defaultValue={priority ?? ''} aria-label="Priority">
+            <option value="">All priorities</option>
+            <option value="same_day">STAT (same day)</option>
+            <option value="priority_24h">24 hour</option>
+            <option value="priority_48h">48 hour</option>
+            <option value="normal">Normal</option>
+          </Select>
+
+          <Select name="category" defaultValue={category ?? ''} aria-label="Category">
             <option value="">All categories</option>
             <option value="chemistry">Chemistry</option>
             <option value="microbiology">Microbiology</option>
-          </select>
-          <select name="priority" defaultValue={priority ?? ''}
-            className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-            <option value="">All priorities</option>
-            <option value="normal">Normal</option>
-            <option value="priority_24h">Priority 24h</option>
-            <option value="priority_48h">Priority 48h</option>
-            <option value="same_day">Same Day</option>
-          </select>
-          <select name="analyst" defaultValue={analyst ?? ''}
-            className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+          </Select>
+
+          <Select name="analyst" defaultValue={analyst ?? ''} aria-label="Analyst">
             <option value="">All analysts</option>
-            {analysts?.map(a => (
-              <option key={a.id} value={a.email}>
+            {staff?.map(a => (
+              <option key={a.id} value={a.id}>
                 {[a.first_name, a.last_name].filter(Boolean).join(' ') || a.email}
               </option>
             ))}
-          </select>
-          <button type="submit"
-            className="bg-slate-800 hover:bg-slate-700 text-white font-medium px-4 py-2 rounded-xl text-sm transition">
-            Filter
-          </button>
-          {(category || priority || analyst) && (
-            <Link href={`/admin/work-queue${status ? `?status=${status}` : ''}`}
-              className="px-4 py-2 text-sm text-slate-500 hover:text-slate-700 transition">
-              Clear filters
-            </Link>
-          )}
-        </form>
-      </div>
+          </Select>
 
-      {/* Main Table */}
-      <WorkQueueTable rows={filtered as any} reviewers={reviewerProfiles ?? []} />
-    </div>
+          <Select name="reviewer" defaultValue={reviewer ?? ''} aria-label="Reviewer">
+            <option value="">All reviewers</option>
+            <option value="me">Assigned to me</option>
+            <option value="none">Unassigned</option>
+            {reviewerProfiles?.map(r => (
+              <option key={r.id} value={r.id}>
+                {[r.first_name, r.last_name].filter(Boolean).join(' ') || r.email}
+              </option>
+            ))}
+          </Select>
+
+          <Select name="due" defaultValue={due ?? ''} aria-label="Due date">
+            <option value="">Any due date</option>
+            <option value="overdue">Overdue</option>
+            <option value="week">Due within 7 days</option>
+          </Select>
+
+          <button type="submit" className={buttonClass('secondary', 'sm')}>
+            <Filter className="h-3 w-3" /> Apply
+          </button>
+          {hasFilters && (
+            <a href={`/admin/work-queue${status ? `?status=${status}` : ''}`}
+              className="px-1.5 text-[12px] text-ink-3 underline-offset-2 hover:text-ink hover:underline">
+              Clear
+            </a>
+          )}
+          <span className="ml-auto text-[12px] text-ink-3 tabular">{rows.length} shown</span>
+        </Toolbar>
+      </form>
+
+      <WorkQueueTable rows={rows as any} reviewers={reviewerProfiles ?? []} />
+    </Page>
   )
 }

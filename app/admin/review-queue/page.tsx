@@ -1,16 +1,22 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
-import Link from 'next/link'
-import { ClipboardCheck, FlaskConical } from 'lucide-react'
+import { FlaskConical, Filter } from 'lucide-react'
 import ReviewQueueTable from '@/components/work-queue/ReviewQueueTable'
 import { RESULT_QUEUE_SELECT } from '@/lib/queries/result-queue'
 import { isOverdue } from '@/lib/workflow'
+import {
+  Page, PageHeader, Tabs, Toolbar, Select, SearchField, ButtonLink, buttonClass,
+} from '@/components/ui/primitives'
 
-interface SearchParams { category?: string; priority?: string; reviewer?: string }
+interface SearchParams {
+  category?: string; priority?: string; reviewer?: string
+  analyst?: string; due?: string; q?: string; view?: string
+}
 interface Props { searchParams: Promise<SearchParams> }
 
 export default async function ReviewQueuePage({ searchParams }: Props) {
-  const { category, priority, reviewer } = await searchParams
+  const sp = await searchParams
+  const { category, priority, reviewer, analyst, due, q, view } = sp
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
@@ -20,6 +26,12 @@ export default async function ReviewQueuePage({ searchParams }: Props) {
     .select('id, first_name, last_name, email')
     .or('can_review.eq.true,role.in.(admin,manager)')
     .eq('is_active', true)
+    .order('first_name')
+
+  const { data: analystProfiles } = await supabase
+    .from('profiles')
+    .select('id, first_name, last_name, email')
+    .in('role', ['analyst', 'admin', 'manager'])
     .order('first_name')
 
   let query = supabase
@@ -32,44 +44,70 @@ export default async function ReviewQueuePage({ searchParams }: Props) {
 
   const { data: sampleTests } = await query
 
-  const filtered = ((sampleTests ?? []) as any[]).filter(st => {
+  const scoped = ((sampleTests ?? []) as any[]).filter(st => {
     if (priority && st.samples?.orders?.priority !== priority) return false
+    if (analyst && st.entered_by_profile?.id !== analyst) return false
     if (reviewer === 'me'   && st.assigned_reviewer_id !== user.id) return false
     if (reviewer === 'none' && st.assigned_reviewer_id) return false
-    if (reviewer && reviewer !== 'me' && reviewer !== 'none' && st.assigned_reviewer_id !== reviewer) return false
+    if (reviewer && !['me', 'none'].includes(reviewer) && st.assigned_reviewer_id !== reviewer) return false
+    if (due === 'overdue' && !isOverdue(st.samples?.orders?.date_due)) return false
+    if (q) {
+      const hay = [st.samples?.orders?.order_number, st.samples?.sample_id, st.tests?.name, st.tests?.code]
+        .filter(Boolean).join(' ').toLowerCase()
+      if (!hay.includes(q.toLowerCase())) return false
+    }
     return true
   })
 
-  const inReviewCount   = filtered.filter(s => s.status === 'reviewed').length
-  const unassignedCount = filtered.filter(s => s.status === 'entered').length
-  const overdueCount    = filtered.filter(s => s.status === 'reviewed' && isOverdue(s.samples?.orders?.date_due)).length
-  const mineCount       = filtered.filter(s => s.assigned_reviewer_id === user.id).length
+  const inReview   = scoped.filter(s => s.status === 'reviewed')
+  const unassigned = scoped.filter(s => s.status === 'entered')
+  const mine       = scoped.filter(s => s.assigned_reviewer_id === user.id && s.status === 'reviewed')
+  const overdue    = inReview.filter(s => isOverdue(s.samples?.orders?.date_due))
+
+  const rows =
+    view === 'mine'       ? mine :
+    view === 'unassigned' ? unassigned :
+    view === 'overdue'    ? overdue :
+    scoped
+
+  const href = (v: string) => {
+    const p = new URLSearchParams(Object.entries(sp).filter(([k, val]) => val && k !== 'view') as [string, string][])
+    if (v) p.set('view', v)
+    const qs = p.toString()
+    return `/admin/review-queue${qs ? `?${qs}` : ''}`
+  }
+
+  const tabs = [
+    { key: '',           label: 'All',           href: href(''),            count: scoped.length,     active: !view },
+    { key: 'mine',       label: 'Assigned to me',href: href('mine'),        count: mine.length,       active: view === 'mine' },
+    { key: 'unassigned', label: 'Unassigned',    href: href('unassigned'),  count: unassigned.length, active: view === 'unassigned' },
+    { key: 'overdue',    label: 'Overdue',       href: href('overdue'),     count: overdue.length,    active: view === 'overdue' },
+  ]
+
+  const hasFilters = !!(category || priority || reviewer || analyst || due || q)
 
   return (
-    <div className="p-6 max-w-7xl mx-auto">
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
-            <ClipboardCheck className="w-6 h-6 text-purple-600" />
-            Review Queue
-          </h1>
-          <p className="text-slate-500 text-sm mt-1">
-            {inReviewCount} awaiting a review decision · {mineCount} assigned to you ·{' '}
-            {unassignedCount} not yet assigned to a reviewer
-            {overdueCount > 0 && <span className="text-red-600 font-medium"> · {overdueCount} overdue</span>}
-          </p>
-        </div>
-        <Link href="/admin/work-queue"
-          className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-white font-semibold px-4 py-2.5 rounded-xl transition shadow-sm text-sm">
-          <FlaskConical className="w-4 h-4" /> Work Queue
-        </Link>
-      </div>
+    <Page wide>
+      <PageHeader
+        title="Review Queue"
+        meta={
+          <>
+            {inReview.length} result{inReview.length === 1 ? '' : 's'} awaiting a review decision
+            {mine.length > 0 && <> · <span className="font-medium text-ink-2">{mine.length} assigned to you</span></>}
+            {overdue.length > 0 && <> · <span className="font-medium text-crit-fg">{overdue.length} overdue</span></>}
+          </>
+        }
+        actions={<ButtonLink href="/admin/work-queue"><FlaskConical className="h-3.5 w-3.5" /> Work Queue</ButtonLink>}
+      />
 
-      {/* Filters */}
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 mb-6">
-        <form className="flex flex-wrap gap-3">
-          <select name="reviewer" defaultValue={reviewer ?? ''}
-            className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+      <div className="mb-3"><Tabs items={tabs} /></div>
+
+      <form>
+        {view && <input type="hidden" name="view" value={view} />}
+        <Toolbar>
+          <SearchField defaultValue={q} placeholder="Search order, sample or test…" />
+
+          <Select name="reviewer" defaultValue={reviewer ?? ''} aria-label="Reviewer">
             <option value="">All reviewers</option>
             <option value="me">Assigned to me</option>
             <option value="none">Not yet assigned</option>
@@ -78,35 +116,50 @@ export default async function ReviewQueuePage({ searchParams }: Props) {
                 {[r.first_name, r.last_name].filter(Boolean).join(' ') || r.email}
               </option>
             ))}
-          </select>
-          <select name="category" defaultValue={category ?? ''}
-            className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+          </Select>
+
+          <Select name="analyst" defaultValue={analyst ?? ''} aria-label="Analyst">
+            <option value="">All analysts</option>
+            {analystProfiles?.map(a => (
+              <option key={a.id} value={a.id}>
+                {[a.first_name, a.last_name].filter(Boolean).join(' ') || a.email}
+              </option>
+            ))}
+          </Select>
+
+          <Select name="category" defaultValue={category ?? ''} aria-label="Category">
             <option value="">All categories</option>
             <option value="chemistry">Chemistry</option>
             <option value="microbiology">Microbiology</option>
-          </select>
-          <select name="priority" defaultValue={priority ?? ''}
-            className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-            <option value="">All priorities</option>
-            <option value="normal">Normal</option>
-            <option value="priority_24h">Priority 24h</option>
-            <option value="priority_48h">Priority 48h</option>
-            <option value="same_day">Same Day</option>
-          </select>
-          <button type="submit"
-            className="bg-slate-800 hover:bg-slate-700 text-white font-medium px-4 py-2 rounded-xl text-sm transition">
-            Filter
-          </button>
-          {(category || priority || reviewer) && (
-            <Link href="/admin/review-queue"
-              className="px-4 py-2 text-sm text-slate-500 hover:text-slate-700 transition">
-              Clear
-            </Link>
-          )}
-        </form>
-      </div>
+          </Select>
 
-      <ReviewQueueTable rows={filtered as any} />
-    </div>
+          <Select name="priority" defaultValue={priority ?? ''} aria-label="Priority">
+            <option value="">All priorities</option>
+            <option value="same_day">STAT (same day)</option>
+            <option value="priority_24h">24 hour</option>
+            <option value="priority_48h">48 hour</option>
+            <option value="normal">Normal</option>
+          </Select>
+
+          <Select name="due" defaultValue={due ?? ''} aria-label="Due date">
+            <option value="">Any due date</option>
+            <option value="overdue">Overdue</option>
+          </Select>
+
+          <button type="submit" className={buttonClass('secondary', 'sm')}>
+            <Filter className="h-3 w-3" /> Apply
+          </button>
+          {hasFilters && (
+            <a href={`/admin/review-queue${view ? `?view=${view}` : ''}`}
+              className="px-1.5 text-[12px] text-ink-3 underline-offset-2 hover:text-ink hover:underline">
+              Clear
+            </a>
+          )}
+          <span className="ml-auto text-[12px] text-ink-3 tabular">{rows.length} shown</span>
+        </Toolbar>
+      </form>
+
+      <ReviewQueueTable rows={rows as any} />
+    </Page>
   )
 }

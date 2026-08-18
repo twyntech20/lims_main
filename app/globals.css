@@ -1,46 +1,144 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+/* ============================================================
+   FQLabs design system
+   A light-only, information-dense palette for laboratory work.
+   Tokens are exposed through Tailwind's @theme so they can be used
+   as utilities (bg-surface, text-ink, border-line, bg-brand-600 …).
+   Default Tailwind colours remain available, so screens that have
+   not been migrated yet keep rendering correctly.
+   ============================================================ */
+
+@theme {
+  /* ── Surfaces ─────────────────────────────────────────── */
+  --color-canvas:        #f6f7f9;  /* app background behind panels */
+  --color-surface:       #ffffff;  /* panels, tables, cards        */
+  --color-surface-muted: #fafbfc;  /* table headers, toolbars      */
+  --color-surface-sunken:#f2f4f7;  /* wells, inactive tabs         */
+
+  /* ── Lines ────────────────────────────────────────────── */
+  --color-line:        #e6e8ec;    /* default hairline             */
+  --color-line-strong: #d3d7de;    /* input borders, dividers      */
+
+  /* ── Ink (dark navy / charcoal) ───────────────────────── */
+  --color-ink:         #0f1729;    /* headings, primary values     */
+  --color-ink-2:       #414c60;    /* body copy                    */
+  --color-ink-3:       #667085;    /* secondary / labels           */
+  --color-ink-4:       #98a2b3;    /* muted / placeholder          */
+
+  /* ── FQLabs primary blue (one controlled hue) ─────────── */
+  --color-brand-50:  #eef4ff;
+  --color-brand-100: #dbe6ff;
+  --color-brand-200: #bcd0ff;
+  --color-brand-500: #3b74ee;
+  --color-brand-600: #1a56db;
+  --color-brand-700: #1444ad;
+  --color-brand-900: #0e2a68;
+  --color-brand-950: #0b1f4d;
+
+  /* ── Reserved status palette ──────────────────────────────
+     Never reused as a "series colour". Always shipped with a
+     text label, never colour alone.                          */
+  --color-ok-fg:     #05683f;
+  --color-ok-bg:     #ecfdf3;
+  --color-ok-line:   #a9e8c4;
+
+  --color-warn-fg:   #a54800;
+  --color-warn-bg:   #fff8eb;
+  --color-warn-line: #fbdd92;
+
+  --color-crit-fg:   #b02318;
+  --color-crit-bg:   #fef3f2;
+  --color-crit-line: #fbcbc6;
+
+  --color-info-fg:   #1450c0;
+  --color-info-bg:   #eff5ff;
+  --color-info-line: #bfd6fe;
+
+  --color-review-fg:   #5227cc;
+  --color-review-bg:   #f5f3ff;
+  --color-review-line: #d6cffc;
+
+  /* ── Radii: restrained, consistent ────────────────────── */
+  --radius-xs: 3px;
+  --radius-sm: 5px;
+  --radius-md: 7px;
+  --radius-lg: 10px;
+
+  /* ── Shadows: barely there ────────────────────────────── */
+  --shadow-xs: 0 1px 2px 0 rgb(16 24 40 / 0.04);
+  --shadow-sm: 0 1px 3px 0 rgb(16 24 40 / 0.07), 0 1px 2px -1px rgb(16 24 40 / 0.04);
+  --shadow-md: 0 4px 12px -2px rgb(16 24 40 / 0.08), 0 2px 4px -2px rgb(16 24 40 / 0.04);
+  --shadow-pop: 0 12px 28px -6px rgb(16 24 40 / 0.16);
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
-}
-
-/* ── Global input/select/textarea styles ── */
-/* Use @layer base so Tailwind v4 doesn't override these */
 @layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+    text-size-adjust: 100%;
+  }
+
+  body {
+    background: var(--color-canvas);
+    color: var(--color-ink);
+    font-family: var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    /* 13px base: laboratory screens carry a lot of data per row. */
+    font-size: 13px;
+    line-height: 1.5;
+  }
+
+  /* Numeric columns line up when digits share a width. */
+  .tabular { font-variant-numeric: tabular-nums; }
+
+  /* Form controls: one shared look, defined once. */
   input,
   select,
   textarea {
-    color: #1e293b !important; /* slate-800 — visible typed text */
+    color: var(--color-ink);
+    font-size: 13px;
   }
 
   input::placeholder,
   textarea::placeholder {
-    color: #94a3b8 !important; /* slate-400 — visible but clearly secondary */
-    opacity: 1 !important;     /* Firefox resets opacity on placeholders */
+    color: var(--color-ink-4);
+    opacity: 1;             /* Firefox dims placeholders by default */
   }
 
-  select option {
-    color: #1e293b;
+  select option { color: var(--color-ink); }
+
+  /* Focus: a single visible ring everywhere, never removed. */
+  :where(a, button, input, select, textarea, [tabindex]):focus-visible {
+    outline: 2px solid var(--color-brand-600);
+    outline-offset: 1px;
+    border-radius: var(--radius-sm);
   }
+
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb {
+    background: #d3d7de;
+    border: 3px solid transparent;
+    background-clip: content-box;
+    border-radius: 999px;
+  }
+  ::-webkit-scrollbar-thumb:hover { background-color: #b6bcc7; background-clip: content-box; }
+}
+
+@layer components {
+  /* A data table that keeps its header visible while the body scrolls.
+     Used by the shared DataTable shell. */
+  .fq-sticky-head thead th {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    background: var(--color-surface-muted);
+  }
+
+  /* Rows stay legible while remaining compact. */
+  .fq-row-hover:hover { background: var(--color-surface-muted); }
+}
+
+@media print {
+  .print\:hidden { display: none !important; }
+  body { background: #fff; }
 }

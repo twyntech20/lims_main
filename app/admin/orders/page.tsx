@@ -1,180 +1,235 @@
 import { createClient } from '@/lib/supabase/server'
-import { formatDate, getOrderStatusColor, getPriorityColor, getPriorityLabel } from '@/lib/utils'
 import Link from 'next/link'
-import { PlusCircle, Search } from 'lucide-react'
-import PriorityFilter from '@/components/orders/PriorityFilter'
+import { Plus, Filter, ClipboardList, AlertTriangle, ArrowRight } from 'lucide-react'
+import { formatDate, getPriorityLabel } from '@/lib/utils'
+import { personName, waitingTime, isOverdue } from '@/lib/workflow'
+import {
+  Page, PageHeader, Tabs, Toolbar, Select, SearchField, ButtonLink, buttonClass,
+  Badge, Mono, Table, Th, Td, Tr, TableWrap, EmptyState, type Tone,
+} from '@/components/ui/primitives'
+import { ProgressCell } from '@/components/ui/metrics'
 
-const STATUS_LABELS: Record<string, string> = {
-  new: 'New', submitted: 'Submitted', in_progress: 'In Progress',
-  review: 'In Review', completed: 'Completed', cancelled: 'Cancelled',
+const STATUS: Record<string, { label: string; tone: Tone }> = {
+  new:         { label: 'New',         tone: 'neutral' },
+  submitted:   { label: 'Submitted',   tone: 'info' },
+  in_progress: { label: 'In Progress', tone: 'warn' },
+  review:      { label: 'In Review',   tone: 'review' },
+  completed:   { label: 'Released',    tone: 'ok' },
+  cancelled:   { label: 'Cancelled',   tone: 'neutral' },
+}
+
+const PRIORITY_TONE: Record<string, Tone> = {
+  normal: 'neutral', priority_48h: 'warn', priority_24h: 'warn', same_day: 'crit',
 }
 
 interface Props {
-  searchParams: Promise<{ status?: string; priority?: string; q?: string }>
+  searchParams: Promise<{ status?: string; priority?: string; q?: string; analyst?: string }>
 }
 
 export default async function AdminOrdersPage({ searchParams }: Props) {
   const params = await searchParams
   const supabase = await createClient()
 
-  let query = supabase
-    .from('orders')
-    .select(`
-      id, order_number, status, priority, date_received, date_due, date_completed,
-      clients(client_name),
-      profiles!orders_assigned_analyst_id_fkey(first_name, last_name)
-    `)
-    .order('created_at', { ascending: false })
+  const [{ data: orders }, { data: analysts }] = await Promise.all([
+    supabase
+      .from('orders')
+      .select(`
+        id, order_number, status, priority, date_received, date_due, date_completed,
+        released_at, updated_at, assigned_analyst_id,
+        clients(client_name),
+        profiles!orders_assigned_analyst_id_fkey(first_name, last_name, email),
+        samples(id, sample_tests(id, status))
+      `)
+      .order('created_at', { ascending: false }),
+    supabase.from('profiles').select('id, first_name, last_name, email')
+      .in('role', ['analyst', 'admin', 'manager']).order('first_name'),
+  ])
 
-  if (params.status)   query = query.eq('status', params.status)
-  if (params.priority) query = query.eq('priority', params.priority)
+  const all = (orders ?? []) as any[]
 
-  const { data: orders } = await query
+  const filtered = all.filter(o => {
+    if (params.status   && o.status !== params.status) return false
+    if (params.priority && o.priority !== params.priority) return false
+    if (params.analyst  && o.assigned_analyst_id !== params.analyst) return false
+    if (params.q) {
+      const hay = [o.order_number, o.clients?.client_name].filter(Boolean).join(' ').toLowerCase()
+      if (!hay.includes(params.q.toLowerCase())) return false
+    }
+    return true
+  })
 
-  const filteredOrders = params.q
-    ? (orders ?? []).filter((o: any) =>
-        o.order_number?.toLowerCase().includes(params.q!.toLowerCase()) ||
-        o.clients?.client_name?.toLowerCase().includes(params.q!.toLowerCase())
-      )
-    : (orders ?? [])
-
-  const statusCounts = (orders ?? []).reduce((acc: Record<string, number>, o: any) => {
-    acc[o.status] = (acc[o.status] ?? 0) + 1
-    return acc
+  const statusCounts = all.reduce<Record<string, number>>((acc, o) => {
+    acc[o.status] = (acc[o.status] ?? 0) + 1; return acc
   }, {})
 
+  const href = (status?: string) => {
+    const p = new URLSearchParams(
+      Object.entries(params).filter(([k, v]) => v && k !== 'status') as [string, string][],
+    )
+    if (status) p.set('status', status)
+    const qs = p.toString()
+    return `/admin/orders${qs ? `?${qs}` : ''}`
+  }
+
+  const tabs = [
+    { key: '', label: 'All', href: href(), count: all.length, active: !params.status },
+    ...['new', 'submitted', 'in_progress', 'review', 'completed', 'cancelled'].map(s => ({
+      key: s,
+      label: STATUS[s].label,
+      href: href(s),
+      count: statusCounts[s] ?? 0,
+      active: params.status === s,
+    })),
+  ]
+
+  const overdueCount = all.filter(
+    o => isOverdue(o.date_due) && !['completed', 'cancelled'].includes(o.status),
+  ).length
+  const hasFilters = !!(params.priority || params.q || params.analyst)
+
   return (
-    <div className="p-6 max-w-7xl mx-auto">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-900">Orders</h1>
-          <p className="text-slate-500 text-sm mt-1">{(orders ?? []).length} total orders</p>
-        </div>
-        <Link
-          href="/admin/orders/new"
-          className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white font-semibold px-4 py-2.5 rounded-xl transition shadow-sm text-sm"
-        >
-          <PlusCircle className="w-4 h-4" />
-          New Order
-        </Link>
-      </div>
+    <Page wide>
+      <PageHeader
+        title="Orders"
+        meta={
+          <>
+            {all.length} order{all.length === 1 ? '' : 's'}
+            {overdueCount > 0 && <> · <span className="font-medium text-crit-fg">{overdueCount} past due</span></>}
+          </>
+        }
+        actions={
+          <ButtonLink href="/admin/orders/new" variant="primary">
+            <Plus className="h-3.5 w-3.5" /> New order
+          </ButtonLink>
+        }
+      />
 
-      {/* Status filter tabs */}
-      <div className="flex gap-2 mb-5 overflow-x-auto pb-1">
-        {[undefined, 'new', 'submitted', 'in_progress', 'review', 'completed', 'cancelled'].map(s => {
-          const label  = s ? STATUS_LABELS[s] : 'All'
-          const count  = s ? (statusCounts[s] ?? 0) : (orders ?? []).length
-          const active = (params.status ?? '') === (s ?? '')
-          return (
-            <Link
-              key={s ?? 'all'}
-              href={s ? `/admin/orders?status=${s}` : '/admin/orders'}
-              className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-sm font-medium whitespace-nowrap transition ${
-                active
-                  ? 'bg-blue-600 text-white shadow-sm'
-                  : 'bg-white border border-slate-200 text-slate-600 hover:border-slate-300'
-              }`}
-            >
-              {label}
-              <span className={`text-xs px-1.5 py-0.5 rounded-full ${active ? 'bg-blue-500 text-white' : 'bg-slate-100 text-slate-500'}`}>
-                {count}
-              </span>
-            </Link>
-          )
-        })}
-      </div>
+      <div className="mb-3"><Tabs items={tabs} /></div>
 
-      {/* Search + priority filter */}
-      <div className="flex gap-3 mb-5">
-        <form className="flex-1 relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-          <input
-            type="text"
-            name="q"
-            defaultValue={params.q}
-            placeholder="Search by order # or client…"
-            className="w-full pl-9 pr-16 py-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-          />
-          {params.status   && <input type="hidden" name="status"   value={params.status} />}
-          {params.priority && <input type="hidden" name="priority" value={params.priority} />}
-          <button type="submit" className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-blue-600 font-medium">
-            Search
+      <form>
+        {params.status && <input type="hidden" name="status" value={params.status} />}
+        <Toolbar>
+          <SearchField defaultValue={params.q} placeholder="Search order number or client…" />
+          <Select name="priority" defaultValue={params.priority ?? ''} aria-label="Priority">
+            <option value="">All priorities</option>
+            <option value="same_day">STAT (same day)</option>
+            <option value="priority_24h">24 hour</option>
+            <option value="priority_48h">48 hour</option>
+            <option value="normal">Normal</option>
+          </Select>
+          <Select name="analyst" defaultValue={params.analyst ?? ''} aria-label="Assigned analyst">
+            <option value="">All analysts</option>
+            {analysts?.map(a => (
+              <option key={a.id} value={a.id}>
+                {[a.first_name, a.last_name].filter(Boolean).join(' ') || a.email}
+              </option>
+            ))}
+          </Select>
+          <button type="submit" className={buttonClass('secondary', 'sm')}>
+            <Filter className="h-3 w-3" /> Apply
           </button>
-        </form>
-        {/* Client component — contains onChange */}
-        <PriorityFilter current={params.priority} />
-      </div>
+          {hasFilters && (
+            <a href={href(params.status)} className="px-1.5 text-[12px] text-ink-3 underline-offset-2 hover:text-ink hover:underline">
+              Clear
+            </a>
+          )}
+          <span className="ml-auto text-[12px] text-ink-3 tabular">{filtered.length} shown</span>
+        </Toolbar>
+      </form>
 
-      {/* Table */}
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="text-left text-slate-500 text-xs uppercase tracking-wide border-b border-slate-100 bg-slate-50">
-              <th className="px-5 py-3 font-medium">Order #</th>
-              <th className="px-5 py-3 font-medium">Client</th>
-              <th className="px-5 py-3 font-medium">Status</th>
-              <th className="px-5 py-3 font-medium">Priority</th>
-              <th className="px-5 py-3 font-medium">Analyst</th>
-              <th className="px-5 py-3 font-medium">Received</th>
-              <th className="px-5 py-3 font-medium">Due</th>
-              <th className="px-5 py-3 font-medium"></th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-50">
-            {filteredOrders.map((order: any) => {
-              const analyst = order.profiles
-                ? [order.profiles.first_name, order.profiles.last_name].filter(Boolean).join(' ')
-                : null
-              return (
-                <tr key={order.id} className="hover:bg-slate-50 transition-colors group">
-                  <td className="px-5 py-3.5 font-medium text-slate-900">{order.order_number}</td>
-                  <td className="px-5 py-3.5 text-slate-700">{order.clients?.client_name ?? '—'}</td>
-                  <td className="px-5 py-3.5">
-                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getOrderStatusColor(order.status)}`}>
-                      {STATUS_LABELS[order.status] ?? order.status}
-                    </span>
-                  </td>
-                  <td className="px-5 py-3.5">
-                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${getPriorityColor(order.priority)}`}>
-                      {getPriorityLabel(order.priority)}
-                    </span>
-                  </td>
-                  <td className="px-5 py-3.5 text-slate-500">
-                    {analyst ?? <span className="text-slate-300">Unassigned</span>}
-                  </td>
-                  <td className="px-5 py-3.5 text-slate-500">{formatDate(order.date_received)}</td>
-                  <td className="px-5 py-3.5 text-slate-500">
-                    {order.date_due ? (
-                      <span className={
-                        new Date(order.date_due) < new Date() && !['completed','cancelled'].includes(order.status)
-                          ? 'text-red-600 font-medium' : ''
-                      }>
+      {filtered.length === 0 ? (
+        <TableWrap>
+          <EmptyState
+            icon={ClipboardList}
+            title="No orders match these filters"
+            description="Adjust the filters above, or create the first order."
+            action={<ButtonLink href="/admin/orders/new" variant="primary"><Plus className="h-3.5 w-3.5" /> New order</ButtonLink>}
+          />
+        </TableWrap>
+      ) : (
+        <TableWrap maxHeight="calc(100vh - 260px)">
+          <Table>
+            <thead>
+              <tr>
+                <Th width="120px">Order #</Th>
+                <Th>Client</Th>
+                <Th width="90px" align="right">Samples</Th>
+                <Th width="90px">Priority</Th>
+                <Th width="150px">Analyst</Th>
+                <Th width="120px">Progress</Th>
+                <Th width="120px">Status</Th>
+                <Th width="100px">Due</Th>
+                <Th width="90px">Updated</Th>
+                <Th width="70px" />
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map(order => {
+                const samples = order.samples ?? []
+                const tests = samples.flatMap((s: any) => s.sample_tests ?? [])
+                const approved = tests.filter((t: any) => t.status === 'approved').length
+                const overdue = isOverdue(order.date_due) && !['completed', 'cancelled'].includes(order.status)
+                const meta = STATUS[order.status] ?? { label: order.status, tone: 'neutral' as Tone }
+
+                return (
+                  <Tr key={order.id} flag={overdue ? 'crit' : undefined}>
+                    <Td className="whitespace-nowrap">
+                      <Link href={`/admin/orders/${order.id}`} className="font-medium text-brand-600 hover:text-brand-700">
+                        <Mono>{order.order_number}</Mono>
+                      </Link>
+                    </Td>
+                    <Td>
+                      <span className="block max-w-[240px] truncate text-ink">{order.clients?.client_name ?? '—'}</span>
+                    </Td>
+                    <Td align="right" className="tabular">{samples.length}</Td>
+                    <Td className="whitespace-nowrap">
+                      {order.priority === 'normal'
+                        ? <span className="text-[12px] text-ink-4">Normal</span>
+                        : <Badge tone={PRIORITY_TONE[order.priority] ?? 'neutral'} dot>
+                            {getPriorityLabel(order.priority)}
+                          </Badge>}
+                    </Td>
+                    <Td className="whitespace-nowrap text-[12px]">
+                      {order.profiles
+                        ? personName(order.profiles)
+                        : <span className="text-ink-4">Unassigned</span>}
+                    </Td>
+                    <Td>
+                      {tests.length > 0
+                        ? <ProgressCell done={approved} total={tests.length} />
+                        : <span className="text-[12px] text-ink-4">No tests</span>}
+                    </Td>
+                    <Td className="whitespace-nowrap">
+                      <Badge tone={meta.tone} dot={order.status !== 'new'}>{meta.label}</Badge>
+                    </Td>
+                    <Td className="whitespace-nowrap tabular">
+                      <span className={overdue ? 'font-medium text-crit-fg' : 'text-ink-2'}>
                         {formatDate(order.date_due)}
                       </span>
-                    ) : '—'}
-                  </td>
-                  <td className="px-5 py-3.5">
-                    <Link
-                      href={`/admin/orders/${order.id}`}
-                      className="text-blue-600 hover:text-blue-700 font-medium text-xs opacity-0 group-hover:opacity-100 transition"
-                    >
-                      Open →
-                    </Link>
-                  </td>
-                </tr>
-              )
-            })}
-            {filteredOrders.length === 0 && (
-              <tr>
-                <td colSpan={8} className="px-5 py-16 text-center text-slate-400">
-                  No orders found
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-    </div>
+                      {overdue && (
+                        <div className="mt-0.5 flex items-center gap-1 text-[11px] text-crit-fg">
+                          <AlertTriangle className="h-3 w-3" /> overdue
+                        </div>
+                      )}
+                    </Td>
+                    <Td className="whitespace-nowrap tabular text-[12px] text-ink-3">
+                      {order.updated_at ? `${waitingTime(order.updated_at)} ago` : '—'}
+                    </Td>
+                    <Td align="right">
+                      <Link
+                        href={`/admin/orders/${order.id}`}
+                        className="inline-flex items-center gap-1 text-[12px] font-medium text-brand-600 hover:text-brand-700"
+                      >
+                        Open <ArrowRight className="h-3 w-3" />
+                      </Link>
+                    </Td>
+                  </Tr>
+                )
+              })}
+            </tbody>
+          </Table>
+        </TableWrap>
+      )}
+    </Page>
   )
 }

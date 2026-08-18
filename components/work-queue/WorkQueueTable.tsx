@@ -1,14 +1,18 @@
 'use client'
 
 import { useState, useTransition } from 'react'
+import Link from 'next/link'
 import { enterResultsBatch, submitSampleForReview } from '@/app/actions/results'
-import { ChevronDown, ChevronRight, CheckCircle2, Clock, FlaskConical, Loader2, Undo2, AlertTriangle, Lock } from 'lucide-react'
-import toast from 'react-hot-toast'
-import { Toaster } from 'react-hot-toast'
 import {
-  workflowState, WORKFLOW_LABEL, WORKFLOW_BADGE, WORKFLOW_NEXT_ACTION,
-  personName, waitingTime, isOverdue,
+  CheckCircle2, Loader2, Undo2, AlertTriangle, Lock, Inbox, X, ChevronRight,
+} from 'lucide-react'
+import toast, { Toaster } from 'react-hot-toast'
+import { cn } from '@/lib/utils'
+import {
+  workflowState, WORKFLOW_LABEL, WORKFLOW_NEXT_ACTION,
+  personName, waitingTime, isOverdue, type WorkflowState,
 } from '@/lib/workflow'
+import { Badge, Mono, Table, Th, Td, Tr, TableWrap, EmptyState, buttonClass, FIELD, type Tone } from '@/components/ui/primitives'
 
 type Person = { id?: string; first_name: string | null; last_name: string | null; email: string } | null
 
@@ -34,6 +38,7 @@ type SampleTest = {
     collection_date: string | null
     orders: {
       id: string
+      order_number?: string | null
       priority: string
       date_due: string | null
       customer_name: string | null
@@ -59,47 +64,73 @@ type SampleTest = {
 
 export type Reviewer = { id: string; first_name: string | null; last_name: string | null; email: string }
 
-const PRIORITY_BADGE: Record<string, string> = {
-  normal:       'bg-slate-100 text-slate-600',
-  priority_24h: 'bg-orange-100 text-orange-700',
-  priority_48h: 'bg-yellow-100 text-yellow-700',
-  same_day:     'bg-red-100 text-red-700',
+/** Workflow state → badge tone. Labels always accompany the colour. */
+const STATE_TONE: Record<WorkflowState, Tone> = {
+  awaiting_entry:  'neutral',
+  returned:        'crit',
+  awaiting_review: 'warn',
+  in_review:       'review',
+  approved:        'ok',
+  released:        'solid',
 }
 
-const PRIORITY_LABEL: Record<string, string> = {
-  normal:       'Normal',
-  priority_24h: '24h',
-  priority_48h: '48h',
-  same_day:     'STAT',
+const PRIORITY: Record<string, { label: string; tone: Tone }> = {
+  normal:       { label: 'Normal', tone: 'neutral' },
+  priority_48h: { label: '48 h',   tone: 'warn' },
+  priority_24h: { label: '24 h',   tone: 'warn' },
+  same_day:     { label: 'STAT',   tone: 'crit' },
 }
 
-const INPUT = 'w-full bg-white border border-slate-300 rounded-lg px-2 py-1.5 text-sm placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500'
+function dueLabel(due: string | null | undefined) {
+  if (!due) return { text: '—', overdue: false }
+  const d = new Date(due)
+  return {
+    text: d.toLocaleDateString('en-AU', { day: '2-digit', month: 'short' }),
+    overdue: d.getTime() < Date.now(),
+  }
+}
 
-function ResultRow({ st, reviewers }: { st: SampleTest; reviewers: Reviewer[] }) {
-  const [pending, startTransition] = useTransition()
-  const [result, setResult]               = useState(st.result ?? '')
-  const [unit, setUnit]                   = useState(st.unit ?? st.tests?.unit ?? '')
-  const [qualifier, setQualifier]         = useState(st.qualifier ?? '')
-  // MDL falls back to the analysis catalog (Master List of Analyses) so the
-  // analyst starts from the documented detection limit.
-  const [mdl, setMdl]                     = useState(st.mdl ?? st.tests?.mdl ?? '')
-  const [dilution, setDilution]           = useState(st.dilution_factor?.toString() ?? '')
-  const [notes, setNotes]                 = useState(st.analyst_notes ?? '')
-  const [dirty, setDirty]                 = useState(false)
-  const [reviewing, startReview]          = useTransition()
-  const [reviewerId, setReviewerId]       = useState('')
+/* ============================================================
+   One work item per row. The entry form is revealed on demand so
+   the queue stays scannable, and every server action called here
+   is the existing one — no workflow logic lives in this file.
+   ============================================================ */
 
+function QueueRow({
+  st, reviewers, orderBasePath,
+}: {
+  st: SampleTest
+  reviewers: Reviewer[]
+  orderBasePath: string
+}) {
+  const order = st.samples?.orders ?? null
   const state = workflowState({
     status: st.status,
     returned_at: st.returned_at,
     assigned_reviewer_id: st.assigned_reviewer_id,
-    order_released_at: st.samples?.orders?.released_at,
+    order_released_at: order?.released_at,
   })
 
-  function markDirty() { setDirty(true) }
+  const [open, setOpen] = useState(false)
+  const [saving, startSave] = useTransition()
+  const [assigning, startAssign] = useTransition()
+
+  const [result, setResult]     = useState(st.result ?? '')
+  const [unit, setUnit]         = useState(st.unit ?? st.tests?.unit ?? '')
+  const [qualifier, setQual]    = useState(st.qualifier ?? '')
+  // MDL falls back to the analysis catalog (Master List of Analyses).
+  const [mdl, setMdl]           = useState(st.mdl ?? st.tests?.mdl ?? '')
+  const [dilution, setDilution] = useState(st.dilution_factor?.toString() ?? '')
+  const [notes, setNotes]       = useState(st.analyst_notes ?? '')
+  const [reviewerId, setReviewerId] = useState('')
+
+  const editable = state === 'awaiting_entry' || state === 'returned' || state === 'awaiting_review'
+  const canAssign = state === 'awaiting_review' || state === 'returned'
+  const due = dueLabel(order?.date_due)
+  const priority = PRIORITY[order?.priority ?? 'normal'] ?? PRIORITY.normal
 
   function handleSave() {
-    startTransition(async () => {
+    startSave(async () => {
       try {
         await enterResultsBatch(st.id, {
           result:          qualifier === 'ND' ? null : result || null,
@@ -109,7 +140,6 @@ function ResultRow({ st, reviewers }: { st: SampleTest; reviewers: Reviewer[] })
           dilution_factor: dilution ? parseFloat(dilution) : null,
           analyst_notes:   notes || null,
         })
-        setDirty(false)
         toast.success('Result saved')
       } catch (err: any) {
         toast.error(err.message ?? 'Failed to save')
@@ -117,176 +147,210 @@ function ResultRow({ st, reviewers }: { st: SampleTest; reviewers: Reviewer[] })
     })
   }
 
-  function handleAssignReview() {
+  function handleAssign() {
     if (!reviewerId) { toast.error('Select a reviewer first'); return }
-    startReview(async () => {
+    startAssign(async () => {
       try {
         await submitSampleForReview(st.id, reviewerId)
         toast.success('Assigned for review')
+        setOpen(false)
       } catch (err: any) {
         toast.error(err.message ?? 'Failed to assign review')
       }
     })
   }
 
-  const isReadonly = state === 'in_review' || state === 'approved' || state === 'released'
-  const canSubmitForReview = state === 'awaiting_review' || state === 'returned'
-
-  // Who currently holds this piece of work.
-  const owner = state === 'in_review'
-    ? `Reviewer: ${personName(st.assigned_reviewer_profile)}`
-    : st.entered_by_profile
-      ? `Analyst: ${personName(st.entered_by_profile)}`
-      : 'Unassigned'
-
-  // The clock that matters for this state: how long it has been waiting
-  // where it is now.
-  const waitingSince = state === 'in_review' ? st.entered_at : st.returned_at ?? st.entered_at
+  const displayResult = st.qualifier === 'ND'
+    ? 'ND'
+    : [st.qualifier, st.result].filter(Boolean).join(' ') || '—'
 
   return (
     <>
-      <tr className="border-b border-slate-100 hover:bg-slate-50 transition">
+      <Tr flag={state === 'returned' ? 'crit' : undefined}>
+        {/* Order */}
+        <Td className="whitespace-nowrap">
+          {order?.id ? (
+            <Link href={`${orderBasePath}/${order.id}`} className="font-medium text-brand-600 hover:text-brand-700">
+              <Mono>{order.order_number ?? 'Order'}</Mono>
+            </Link>
+          ) : <span className="text-ink-4">—</span>}
+          <div className="mt-0.5 max-w-[150px] truncate text-[11px] text-ink-4">
+            {order?.clients?.client_name ?? order?.customer_name ?? ''}
+          </div>
+        </Td>
+
+        {/* Sample */}
+        <Td className="whitespace-nowrap">
+          <Mono className="text-ink">{st.samples?.sample_id ?? '—'}</Mono>
+          {st.samples?.matrix_type && (
+            <div className="mt-0.5 text-[11px] text-ink-4">{st.samples.matrix_type.replace(/_/g, ' ')}</div>
+          )}
+        </Td>
+
         {/* Test */}
-        <td className="px-4 py-3">
-          <div className="font-medium text-slate-900 text-sm">{st.tests?.name ?? '—'}</div>
-          {st.tests?.code && <div className="text-xs text-slate-400 font-mono">{st.tests.code}</div>}
-          {st.tests?.method && <div className="text-xs text-slate-400">{st.tests.method}</div>}
-          <span className={`mt-0.5 inline-block text-xs px-1.5 py-0.5 rounded-full ${
-            st.tests?.category === 'microbiology' ? 'bg-green-50 text-green-700' : 'bg-blue-50 text-blue-700'
-          }`}>{st.tests?.category}</span>
-        </td>
+        <Td>
+          <div className="max-w-[240px] truncate font-medium text-ink">{st.tests?.name ?? '—'}</div>
+          <div className="mt-0.5 flex items-center gap-1.5 text-[11px] text-ink-4">
+            {st.tests?.code && <Mono className="text-[11px]">{st.tests.code}</Mono>}
+            {st.tests?.method && <span className="truncate">· {st.tests.method}</span>}
+          </div>
+        </Td>
 
-        {/* Result */}
-        <td className="px-3 py-3 w-32">
-          {isReadonly
-            ? <span className="text-sm text-slate-700">{qualifier === 'ND' ? 'ND' : result || '—'}</span>
-            : <input value={qualifier === 'ND' ? '' : result}
-                onChange={e => { setResult(e.target.value); markDirty() }}
-                disabled={qualifier === 'ND'}
-                placeholder="0.00"
-                className={INPUT} />
-          }
-        </td>
+        {/* Result so far — context for the reviewer/analyst */}
+        <Td className="whitespace-nowrap tabular">
+          {state === 'awaiting_entry'
+            ? <span className="text-ink-4">—</span>
+            : <span className="font-medium text-ink">{displayResult} <span className="font-normal text-ink-4">{st.unit ?? ''}</span></span>}
+        </Td>
 
-        {/* Unit */}
-        <td className="px-3 py-3 w-24">
-          {isReadonly
-            ? <span className="text-sm text-slate-500">{unit || '—'}</span>
-            : <input value={unit} onChange={e => { setUnit(e.target.value); markDirty() }}
-                placeholder={st.tests?.unit ?? 'unit'}
-                title={st.tests?.unit_options ? `Catalog units: ${st.tests.unit_options}` : undefined}
-                className={INPUT} />
-          }
-        </td>
+        {/* Analyst */}
+        <Td className="whitespace-nowrap text-[12px]">{personName(st.entered_by_profile)}</Td>
 
-        {/* Qualifier */}
-        <td className="px-3 py-3 w-24">
-          {isReadonly
-            ? <span className="text-sm text-slate-500">{qualifier || '—'}</span>
-            : <select value={qualifier} onChange={e => { setQualifier(e.target.value); markDirty() }} className={INPUT}>
-                <option value="">—</option>
-                <option value="ND">ND</option>
-                <option value="<">{"<"}</option>
-                <option value=">">{">"}</option>
-                <option value="B">B</option>
-                <option value="E">E</option>
-              </select>
-          }
-        </td>
-
-        {/* MDL */}
-        <td className="px-3 py-3 w-24">
-          {isReadonly
-            ? <span className="text-sm text-slate-500">{mdl || '—'}</span>
-            : <input value={mdl} onChange={e => { setMdl(e.target.value); markDirty() }}
-                placeholder={st.tests?.mdl ?? 'MDL'} className={INPUT} />
-          }
-        </td>
-
-        {/* Dilution */}
-        <td className="px-3 py-3 w-20">
-          {isReadonly
-            ? <span className="text-sm text-slate-500">{dilution || '1'}</span>
-            : <input value={dilution} onChange={e => { setDilution(e.target.value); markDirty() }}
-                placeholder="1" type="number" min="0" step="0.1" className={INPUT} />
-          }
-        </td>
-
-        {/* Workflow state */}
-        <td className="px-3 py-3 w-40">
-          <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${WORKFLOW_BADGE[state]}`}>
-            {WORKFLOW_LABEL[state]}
-          </span>
+        {/* Reviewer */}
+        <Td className="whitespace-nowrap text-[12px]">
+          {st.assigned_reviewer_profile
+            ? personName(st.assigned_reviewer_profile)
+            : <span className="text-ink-4">Unassigned</span>}
           {(st.review_round ?? 1) > 1 && (
-            <div className="text-[11px] text-slate-400 mt-1">Review round {st.review_round}</div>
+            <div className="mt-0.5 text-[11px] text-ink-4">round {st.review_round}</div>
           )}
-        </td>
+        </Td>
 
-        {/* Who holds it, and for how long */}
-        <td className="px-3 py-3 w-44 text-xs text-slate-500">
-          <div className="text-slate-700">{owner}</div>
-          {state !== 'released' && state !== 'awaiting_entry' && (
-            <div className="text-slate-400 mt-0.5">Waiting {waitingTime(waitingSince)}</div>
-          )}
-        </td>
+        {/* Priority */}
+        <Td className="whitespace-nowrap">
+          {order?.priority === 'normal'
+            ? <span className="text-[12px] text-ink-4">Normal</span>
+            : <Badge tone={priority.tone} dot>{priority.label}</Badge>}
+        </Td>
 
-        {/* Next action */}
-        <td className="px-3 py-3 w-44 text-xs text-slate-500">{WORKFLOW_NEXT_ACTION[state]}</td>
-
-        {/* Actions */}
-        <td className="px-3 py-3 w-48">
-          {state === 'released' ? (
-            <span className="text-xs text-slate-400 flex items-center gap-1"><Lock className="w-3 h-3" /> Released</span>
-          ) : state === 'approved' ? (
-            <span className="text-xs text-green-600 flex items-center gap-1"><CheckCircle2 className="w-3 h-3" /> Approved</span>
-          ) : state === 'in_review' ? (
-            <span className="text-xs text-slate-400 flex items-center gap-1"><Clock className="w-3 h-3" /> With reviewer</span>
-          ) : (
-            <div className="flex flex-col gap-1.5">
-              {dirty && (
-                <button onClick={handleSave} disabled={pending}
-                  className="flex items-center justify-center gap-1 bg-blue-600 hover:bg-blue-500 disabled:bg-blue-300 text-white text-xs font-medium px-3 py-1.5 rounded-lg transition">
-                  {pending ? <Loader2 className="w-3 h-3 animate-spin" /> : null}
-                  {pending ? 'Saving…' : 'Save'}
-                </button>
-              )}
-              {canSubmitForReview && !dirty && (
-                <div className="flex flex-col gap-1">
-                  <select value={reviewerId} onChange={e => setReviewerId(e.target.value)}
-                    className="text-xs bg-white border border-slate-300 rounded-lg px-1.5 py-1 focus:outline-none focus:ring-2 focus:ring-blue-500">
-                    <option value="">Reviewer…</option>
-                    {reviewers.map(r => (
-                      <option key={r.id} value={r.id}>
-                        {[r.first_name, r.last_name].filter(Boolean).join(' ') || r.email}
-                      </option>
-                    ))}
-                  </select>
-                  <button onClick={handleAssignReview} disabled={reviewing || !reviewerId}
-                    className="flex items-center justify-center gap-1 bg-slate-800 hover:bg-slate-700 disabled:bg-slate-400 text-white text-xs font-medium px-3 py-1.5 rounded-lg transition">
-                    {reviewing ? <Loader2 className="w-3 h-3 animate-spin" /> : <Clock className="w-3 h-3" />}
-                    {reviewing ? '…' : state === 'returned' ? 'Re-submit Review' : 'Assign Review'}
-                  </button>
-                </div>
-              )}
+        {/* Due */}
+        <Td className="whitespace-nowrap tabular">
+          <span className={cn('text-[12px]', due.overdue && state !== 'released' ? 'font-medium text-crit-fg' : 'text-ink-2')}>
+            {due.text}
+          </span>
+          {due.overdue && state !== 'released' && state !== 'approved' && (
+            <div className="mt-0.5 flex items-center gap-1 text-[11px] text-crit-fg">
+              <AlertTriangle className="h-3 w-3" /> overdue
             </div>
           )}
-        </td>
-      </tr>
+        </Td>
 
-      {/* What is blocking this result — the reviewer's reason, kept until
-          it goes back for review so the analyst can see what to fix. */}
+        {/* Status */}
+        <Td className="whitespace-nowrap">
+          <Badge tone={STATE_TONE[state]} dot={state !== 'awaiting_entry'}>{WORKFLOW_LABEL[state]}</Badge>
+          {state !== 'awaiting_entry' && state !== 'released' && (
+            <div className="mt-0.5 text-[11px] text-ink-4">
+              {waitingTime(state === 'returned' ? st.returned_at : st.entered_at)} waiting
+            </div>
+          )}
+        </Td>
+
+        {/* Next action */}
+        <Td className="whitespace-nowrap">
+          {editable || canAssign ? (
+            <button
+              onClick={() => setOpen(v => !v)}
+              className={buttonClass(state === 'returned' ? 'danger' : 'primary', 'sm')}
+              aria-expanded={open}
+            >
+              {open ? <X className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+              {state === 'returned' ? 'Resolve return' : state === 'awaiting_entry' ? 'Enter result' : 'Assign reviewer'}
+            </button>
+          ) : (
+            <span className="flex items-center gap-1.5 text-[12px] text-ink-3">
+              {state === 'in_review' && <><Loader2 className="h-3 w-3" /> {WORKFLOW_NEXT_ACTION[state]}</>}
+              {state === 'approved'  && <><CheckCircle2 className="h-3 w-3 text-ok-fg" /> Release report</>}
+              {state === 'released'  && <><Lock className="h-3 w-3" /> Released</>}
+            </span>
+          )}
+        </Td>
+      </Tr>
+
+      {/* Reviewer's reason, always visible on returned work. */}
       {state === 'returned' && st.rejection_reason && (
-        <tr className="border-b border-slate-100 bg-red-50">
-          <td colSpan={10} className="px-4 py-2">
-            <div className="flex items-start gap-2 text-xs">
-              <Undo2 className="w-3.5 h-3.5 text-red-600 mt-0.5 shrink-0" />
-              <div>
-                <span className="font-semibold text-red-700">
+        <tr className="bg-crit-bg/45">
+          <td colSpan={10} className="border-b border-line px-3 pb-2 pt-0">
+            <div className="flex items-start gap-2 rounded-md border border-crit-line bg-surface px-2.5 py-1.5 text-[12px]">
+              <Undo2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-crit-fg" />
+              <p className="text-ink-2">
+                <span className="font-medium text-crit-fg">
                   Returned by {personName(st.returned_by_profile)}
                   {st.returned_at ? ` · ${waitingTime(st.returned_at)} ago` : ''}:
                 </span>{' '}
-                <span className="text-red-800">{st.rejection_reason}</span>
-              </div>
+                {st.rejection_reason}
+              </p>
+            </div>
+          </td>
+        </tr>
+      )}
+
+      {/* Inline editor — same fields and same server actions as before. */}
+      {open && (editable || canAssign) && (
+        <tr className="bg-surface-muted">
+          <td colSpan={10} className="border-b border-line px-3 py-3">
+            <div className="flex flex-wrap items-end gap-3">
+              {editable && (
+                <>
+                  <Labelled label="Result">
+                    <input
+                      value={qualifier === 'ND' ? '' : result}
+                      onChange={e => setResult(e.target.value)}
+                      disabled={qualifier === 'ND'}
+                      placeholder="0.00"
+                      className={cn(FIELD, 'w-28 disabled:bg-surface-sunken disabled:text-ink-4')}
+                    />
+                  </Labelled>
+                  <Labelled label="Unit" hint={st.tests?.unit_options ?? undefined}>
+                    <input value={unit} onChange={e => setUnit(e.target.value)}
+                      placeholder={st.tests?.unit ?? 'unit'} className={cn(FIELD, 'w-24')} />
+                  </Labelled>
+                  <Labelled label="Qualifier">
+                    <select value={qualifier} onChange={e => setQual(e.target.value)} className={cn(FIELD, 'w-24 pr-7')}>
+                      <option value="">—</option>
+                      <option value="ND">ND</option>
+                      <option value="&lt;">{'<'}</option>
+                      <option value="&gt;">{'>'}</option>
+                      <option value="B">B</option>
+                      <option value="E">E</option>
+                    </select>
+                  </Labelled>
+                  <Labelled label="MDL">
+                    <input value={mdl} onChange={e => setMdl(e.target.value)}
+                      placeholder={st.tests?.mdl ?? 'MDL'} className={cn(FIELD, 'w-20')} />
+                  </Labelled>
+                  <Labelled label="Dilution">
+                    <input value={dilution} onChange={e => setDilution(e.target.value)} type="number" min="0" step="0.1"
+                      placeholder="1" className={cn(FIELD, 'w-20')} />
+                  </Labelled>
+                  <Labelled label="Analyst notes" grow>
+                    <input value={notes} onChange={e => setNotes(e.target.value)}
+                      placeholder="Observations for the reviewer…" className={cn(FIELD, 'w-full min-w-[200px]')} />
+                  </Labelled>
+                  <button onClick={handleSave} disabled={saving} className={buttonClass('secondary', 'md')}>
+                    {saving && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                    {saving ? 'Saving…' : 'Save result'}
+                  </button>
+                </>
+              )}
+
+              {canAssign && (
+                <div className="flex items-end gap-2 border-l border-line pl-3">
+                  <Labelled label="Send to reviewer">
+                    <select value={reviewerId} onChange={e => setReviewerId(e.target.value)} className={cn(FIELD, 'w-48 pr-7')}>
+                      <option value="">Select reviewer…</option>
+                      {reviewers.map(r => (
+                        <option key={r.id} value={r.id}>
+                          {[r.first_name, r.last_name].filter(Boolean).join(' ') || r.email}
+                        </option>
+                      ))}
+                    </select>
+                  </Labelled>
+                  <button onClick={handleAssign} disabled={assigning || !reviewerId} className={buttonClass('primary', 'md')}>
+                    {assigning && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                    {state === 'returned' ? 'Re-submit for review' : 'Assign review'}
+                  </button>
+                </div>
+              )}
             </div>
           </td>
         </tr>
@@ -295,168 +359,67 @@ function ResultRow({ st, reviewers }: { st: SampleTest; reviewers: Reviewer[] })
   )
 }
 
-type GroupedBySample = {
-  sampleKey: string
-  sample: SampleTest['samples']
-  order: NonNullable<SampleTest['samples']>['orders']
-  tests: SampleTest[]
+function Labelled({
+  label, hint, children, grow,
+}: {
+  label: string
+  hint?: string
+  children: React.ReactNode
+  grow?: boolean
+}) {
+  return (
+    <label className={cn('flex flex-col gap-1', grow && 'min-w-[200px] flex-1')} title={hint}>
+      <span className="text-[11px] font-medium uppercase tracking-[0.05em] text-ink-3">{label}</span>
+      {children}
+    </label>
+  )
 }
 
-export default function WorkQueueTable({ rows, orderBasePath = '/admin/orders', reviewers = [] }: { rows: SampleTest[]; orderBasePath?: string; reviewers?: Reviewer[] }) {
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
-
-  function toggle(key: string) {
-    setCollapsed(prev => {
-      const next = new Set(prev)
-      next.has(key) ? next.delete(key) : next.add(key)
-      return next
-    })
-  }
-
-  // Group by sample
-  const groups: GroupedBySample[] = []
-  const seen = new Map<string, GroupedBySample>()
-
-  for (const row of rows) {
-    const key = row.samples?.id ?? 'unknown'
-    if (!seen.has(key)) {
-      const g: GroupedBySample = { sampleKey: key, sample: row.samples, order: row.samples?.orders ?? null, tests: [] }
-      seen.set(key, g)
-      groups.push(g)
-    }
-    seen.get(key)!.tests.push(row)
-  }
-
-  if (groups.length === 0) {
+export default function WorkQueueTable({
+  rows, orderBasePath = '/admin/orders', reviewers = [],
+}: {
+  rows: SampleTest[]
+  orderBasePath?: string
+  reviewers?: Reviewer[]
+}) {
+  if (rows.length === 0) {
     return (
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-16 text-center">
-        <FlaskConical className="w-10 h-10 text-slate-200 mx-auto mb-3" />
-        <p className="text-slate-400 text-sm">No samples match the current filters</p>
-      </div>
+      <TableWrap>
+        <EmptyState
+          icon={Inbox}
+          title="Nothing in this queue"
+          description="No results match the current tab and filters."
+        />
+      </TableWrap>
     )
   }
 
   return (
     <>
       <Toaster position="top-center" />
-      <div className="space-y-4">
-        {groups.map(({ sampleKey, sample, order, tests }) => {
-          const isCollapsed = collapsed.has(sampleKey)
-          const states = tests.map(t => workflowState({
-            status: t.status,
-            returned_at: t.returned_at,
-            assigned_reviewer_id: t.assigned_reviewer_id,
-            order_released_at: order?.released_at,
-          }))
-          const count = (s: string) => states.filter(x => x === s).length
-          const allDone = states.every(s => s === 'approved' || s === 'released')
-          const returnedCount = count('returned')
-          const overdue = isOverdue(order?.date_due) && !allDone
-
-          return (
-            <div key={sampleKey} className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-              {/* Sample header */}
-              <button
-                type="button"
-                onClick={() => toggle(sampleKey)}
-                className="w-full px-6 py-4 flex items-center gap-3 hover:bg-slate-50 transition text-left">
-                {isCollapsed
-                  ? <ChevronRight className="w-4 h-4 text-slate-400 flex-shrink-0" />
-                  : <ChevronDown className="w-4 h-4 text-slate-400 flex-shrink-0" />
-                }
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-3 flex-wrap">
-                    <span className="font-semibold text-slate-900 font-mono">{sample?.sample_id}</span>
-                    {sample?.description && <span className="text-slate-500 text-sm truncate">{sample.description}</span>}
-                    {sample?.matrix_type && (
-                      <span className="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">{sample.matrix_type}</span>
-                    )}
-                    {order?.priority && order.priority !== 'normal' && (
-                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${PRIORITY_BADGE[order.priority] ?? ''}`}>
-                        {PRIORITY_LABEL[order.priority]}
-                      </span>
-                    )}
-                    {overdue && (
-                      <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-red-100 text-red-700 flex items-center gap-1">
-                        <AlertTriangle className="w-3 h-3" /> Overdue
-                      </span>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-4 mt-1 text-xs text-slate-400">
-                    {order?.clients?.client_name && <span>{order.clients.client_name}</span>}
-                    {order?.customer_name && <span>· {order.customer_name}</span>}
-                    {order?.id && (
-                      <a href={`${orderBasePath}/${order.id}`} onClick={e => e.stopPropagation()}
-                        className="text-blue-500 hover:underline">View order</a>
-                    )}
-                    {order?.date_due && (
-                      <span className={overdue ? 'text-red-500 font-medium' : ''}>
-                        Due: {new Date(order.date_due).toLocaleDateString()}
-                      </span>
-                    )}
-                    {sample?.collection_date && (
-                      <span>Collected: {new Date(sample.collection_date).toLocaleDateString()}</span>
-                    )}
-                  </div>
-                </div>
-                <div className="flex items-center gap-2 flex-shrink-0">
-                  {returnedCount > 0 && (
-                    <span className="text-xs bg-red-50 text-red-700 border border-red-200 px-2 py-0.5 rounded-full">
-                      {returnedCount} returned
-                    </span>
-                  )}
-                  {count('awaiting_entry') > 0 && (
-                    <span className="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">
-                      {count('awaiting_entry')} to enter
-                    </span>
-                  )}
-                  {count('awaiting_review') > 0 && (
-                    <span className="text-xs bg-yellow-50 text-yellow-700 border border-yellow-200 px-2 py-0.5 rounded-full">
-                      {count('awaiting_review')} to assign
-                    </span>
-                  )}
-                  {count('in_review') > 0 && (
-                    <span className="text-xs bg-blue-50 text-blue-700 border border-blue-200 px-2 py-0.5 rounded-full">
-                      {count('in_review')} in review
-                    </span>
-                  )}
-                  {allDone && (
-                    <span className="text-xs bg-green-50 text-green-700 border border-green-200 px-2 py-0.5 rounded-full flex items-center gap-1">
-                      <CheckCircle2 className="w-3 h-3" /> {count('released') > 0 ? 'Released' : 'Ready for release'}
-                    </span>
-                  )}
-                  <span className="text-xs text-slate-400">{tests.length} test{tests.length !== 1 ? 's' : ''}</span>
-                </div>
-              </button>
-
-              {/* Test rows */}
-              {!isCollapsed && (
-                <div className="border-t border-slate-100 overflow-x-auto">
-                  <table className="w-full">
-                    <thead>
-                      <tr className="border-b border-slate-100 bg-slate-50">
-                        <th className="text-left px-4 py-2 text-xs font-semibold text-slate-500 uppercase tracking-wide">Test</th>
-                        <th className="text-left px-3 py-2 text-xs font-semibold text-slate-500 uppercase tracking-wide">Result</th>
-                        <th className="text-left px-3 py-2 text-xs font-semibold text-slate-500 uppercase tracking-wide">Unit</th>
-                        <th className="text-left px-3 py-2 text-xs font-semibold text-slate-500 uppercase tracking-wide">Qual</th>
-                        <th className="text-left px-3 py-2 text-xs font-semibold text-slate-500 uppercase tracking-wide">MDL</th>
-                        <th className="text-left px-3 py-2 text-xs font-semibold text-slate-500 uppercase tracking-wide">Dilution</th>
-                        <th className="text-left px-3 py-2 text-xs font-semibold text-slate-500 uppercase tracking-wide">Status</th>
-                        <th className="text-left px-3 py-2 text-xs font-semibold text-slate-500 uppercase tracking-wide">Owner</th>
-                        <th className="text-left px-3 py-2 text-xs font-semibold text-slate-500 uppercase tracking-wide">Next action</th>
-                        <th className="px-3 py-2" />
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {tests.map(st => <ResultRow key={st.id} st={st} reviewers={reviewers} />)}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-          )
-        })}
-      </div>
+      <TableWrap maxHeight="calc(100vh - 260px)">
+        <Table>
+          <thead>
+            <tr>
+              <Th width="140px">Order</Th>
+              <Th width="120px">Sample</Th>
+              <Th>Test</Th>
+              <Th width="110px">Result</Th>
+              <Th width="120px">Analyst</Th>
+              <Th width="130px">Reviewer</Th>
+              <Th width="90px">Priority</Th>
+              <Th width="90px">Due</Th>
+              <Th width="150px">Status</Th>
+              <Th width="160px">Next action</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(st => (
+              <QueueRow key={st.id} st={st} reviewers={reviewers} orderBasePath={orderBasePath} />
+            ))}
+          </tbody>
+        </Table>
+      </TableWrap>
     </>
   )
 }

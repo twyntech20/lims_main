@@ -1,17 +1,32 @@
 import { createClient } from '@/lib/supabase/server'
 import Link from 'next/link'
-import { Plus, Users, FileBarChart, Settings, ClipboardList, FlaskConical, TestTube, BarChart3 } from 'lucide-react'
+import {
+  ClipboardList, FlaskConical, FileEdit, ShieldCheck, FileText, AlertTriangle,
+  Plus, Activity,
+} from 'lucide-react'
 import DashboardCharts from '@/components/dashboard/DashboardCharts'
-import WorkflowIndicators from '@/components/dashboard/WorkflowIndicators'
+import { Page, PageHeader, Section, Panel, ButtonLink, Badge, Mono, EmptyState } from '@/components/ui/primitives'
+import { StatTile, Pipeline, WorkItem } from '@/components/ui/metrics'
+import { workflowState, isOverdue, personName, waitingTime } from '@/lib/workflow'
 
 interface SearchParams { period?: string }
 interface Props { searchParams: Promise<SearchParams> }
 
 const PERIOD_LABELS: Record<string, string> = {
-  today: 'Today',
-  '7days': '7 Days',
-  '1month': '1 Month',
-  '1year': '1 Year',
+  today: 'Today', '7days': '7 days', '1month': '1 month', '1year': '1 year',
+}
+
+/** Audit actions rendered as plain language for the activity feed. */
+const ACTION_LABEL: Record<string, { label: string; tone: 'neutral' | 'ok' | 'warn' | 'crit' | 'info' | 'review' }> = {
+  result_submitted_for_review:  { label: 'Sent for review',   tone: 'info' },
+  result_approved:              { label: 'Result approved',   tone: 'ok' },
+  result_returned_for_changes:  { label: 'Returned',          tone: 'crit' },
+  submitted_to_client:          { label: 'Released',          tone: 'ok' },
+  amendment_applied:            { label: 'Amendment applied', tone: 'review' },
+  pdf_generated:                { label: 'Report generated',  tone: 'neutral' },
+  INSERT:                       { label: 'Created',           tone: 'neutral' },
+  UPDATE:                       { label: 'Updated',           tone: 'neutral' },
+  DELETE:                       { label: 'Deleted',           tone: 'crit' },
 }
 
 export default async function AdminDashboard({ searchParams }: Props) {
@@ -20,13 +35,9 @@ export default async function AdminDashboard({ searchParams }: Props) {
 
   const { data: { user } } = await supabase.auth.getUser()
   const { data: profile } = await supabase
-    .from('profiles')
-    .select('first_name')
-    .eq('id', user!.id)
-    .single()
-  const displayName = (profile as any)?.first_name ?? 'Admin'
+    .from('profiles').select('first_name, last_name').eq('id', user!.id).single()
+  const displayName = (profile as any)?.first_name ?? 'there'
 
-  // Date range for period
   const now = new Date()
   let since: Date
   switch (period) {
@@ -37,127 +48,210 @@ export default async function AdminDashboard({ searchParams }: Props) {
   }
   const sinceISO = since.toISOString()
 
-  const [ordersRes, samplesRes, testsRes, workflowRes] = await Promise.all([
+  const [ordersRes, samplesRes, allOrdersRes, resultsRes, auditRes] = await Promise.all([
     supabase.from('orders').select('id, status, created_at').gte('created_at', sinceISO),
     supabase.from('samples').select('id').gte('created_at', sinceISO),
-    supabase.from('tests').select('id').eq('is_active', true),
-    // Workflow indicators are counted over every open result, not just the
-    // selected period — a result stuck in review last month is still stuck.
+    // Every open order, for the lifecycle pipeline — a job stuck in review
+    // last month is still stuck today.
+    supabase.from('orders').select('id, status, date_due, released_at'),
     supabase.from('sample_tests').select(`
-      status, returned_at, assigned_reviewer_id, entered_at,
-      samples ( orders ( date_due, released_at ) )
+      id, status, returned_at, assigned_reviewer_id, entered_by, entered_at,
+      samples ( id, order_id, orders ( id, date_due, released_at, assigned_analyst_id ) )
     `),
+    supabase.from('audit_logs')
+      .select('id, action, table_name, record_id, created_at, user_id, profiles ( first_name, last_name, email )')
+      .order('created_at', { ascending: false })
+      .limit(12),
   ])
 
-  const workflowRows = (workflowRes.data ?? []) as any[]
+  const orders     = (ordersRes.data ?? []) as any[]
+  const allOrders  = (allOrdersRes.data ?? []) as any[]
+  const results    = (resultsRes.data ?? []) as any[]
+  const audit      = (auditRes.data ?? []) as any[]
 
-  const orders = (ordersRes.data ?? []) as any[]
+  // ── Result workflow rollup ────────────────────────────────
+  const stateOf = (r: any) => workflowState({
+    status: r.status,
+    returned_at: r.returned_at,
+    assigned_reviewer_id: r.assigned_reviewer_id,
+    order_released_at: r.samples?.orders?.released_at,
+  })
+  const byState = results.reduce<Record<string, number>>((acc, r) => {
+    const s = stateOf(r); acc[s] = (acc[s] ?? 0) + 1; return acc
+  }, {})
+  const count = (s: string) => byState[s] ?? 0
 
+  const overdueOrders = allOrders.filter(
+    o => isOverdue(o.date_due) && !['completed', 'cancelled'].includes(o.status),
+  ).length
+
+  // ── Order lifecycle pipeline ──────────────────────────────
+  // "Approved" is a computed stage: every result signed off but the
+  // report not yet released.
+  const approvedByOrder = new Set<string>()
+  const orderResults = results.reduce<Record<string, any[]>>((acc, r) => {
+    const oid = r.samples?.order_id
+    if (oid) (acc[oid] ??= []).push(r)
+    return acc
+  }, {})
+  for (const [oid, rows] of Object.entries(orderResults)) {
+    if (rows.length > 0 && rows.every(r => r.status === 'approved')) approvedByOrder.add(oid)
+  }
+  const released = allOrders.filter(o => o.released_at).length
+  const stages = [
+    { key: 'received', label: 'Received',
+      count: allOrders.filter(o => ['new', 'submitted'].includes(o.status)).length,
+      href: '/admin/orders?status=submitted' },
+    { key: 'progress', label: 'In progress',
+      count: allOrders.filter(o => o.status === 'in_progress' && !approvedByOrder.has(o.id)).length,
+      href: '/admin/orders?status=in_progress' },
+    { key: 'review', label: 'Review',
+      count: allOrders.filter(o => o.status === 'review' && !approvedByOrder.has(o.id)).length,
+      href: '/admin/orders?status=review' },
+    { key: 'approved', label: 'Approved',
+      count: allOrders.filter(o => approvedByOrder.has(o.id) && !o.released_at).length,
+      href: '/admin/work-queue?status=approved' },
+    { key: 'released', label: 'Released', count: released, href: '/admin/reports' },
+  ]
+
+  // ── My work ───────────────────────────────────────────────
+  const mine = {
+    assignedToMe: results.filter(r => r.status === 'reviewed' && r.assigned_reviewer_id === user!.id).length,
+    overdueReviews: results.filter(
+      r => r.status === 'reviewed' && r.assigned_reviewer_id === user!.id && isOverdue(r.samples?.orders?.date_due),
+    ).length,
+    returned: count('returned'),
+    awaitingEntry: count('awaiting_entry'),
+    readyToRelease: count('approved'),
+  }
+
+  // ── Charts (only rendered when there is something to plot) ─
   const statusCounts: Record<string, number> = {}
   for (const o of orders) statusCounts[o.status] = (statusCounts[o.status] ?? 0) + 1
-
   const timeline: Record<string, number> = {}
   for (const o of orders) {
     const day = (o.created_at as string).slice(0, 10)
     timeline[day] = (timeline[day] ?? 0) + 1
   }
-
-  const chartStatusData = Object.entries(statusCounts).map(([status, count]) => ({
-    name: status.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
-    Orders: count,
+  const chartStatusData = Object.entries(statusCounts).map(([status, n]) => ({
+    name: status.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()), Orders: n,
   }))
+  const chartTimelineData = Object.entries(timeline).sort(([a], [b]) => a.localeCompare(b))
+    .map(([date, n]) => ({ date: date.slice(5), Orders: n }))
+  const hasChartData = chartStatusData.length > 0 || chartTimelineData.length > 0
 
-  const chartTimelineData = Object.entries(timeline)
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([date, count]) => ({ date: date.slice(5), Orders: count }))
+  const periodLabel = PERIOD_LABELS[period] ?? '1 month'
+  const today = now.toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
 
-  const periodLabel = PERIOD_LABELS[period] ?? '1 Month'
-
-  const quickActions = [
-    { label: 'Create Order',  sub: 'Submit a new testing order',    href: '/admin/orders/new', bg: 'bg-blue-600',   icon: Plus },
-    { label: 'Manage Users',  sub: 'Add or edit system users',       href: '/admin/users',      bg: 'bg-green-600',  icon: Users },
-    { label: 'View Reports',  sub: 'Access lab test reports',        href: '/admin/reports',    bg: 'bg-red-500',    icon: FileBarChart },
-    { label: 'Settings',      sub: 'Configure system settings',      href: '/admin/settings',   bg: 'bg-yellow-500', icon: Settings },
-  ]
-
-  const statsCards = [
-    { label: 'Orders',  value: orders.length,                       icon: ClipboardList, color: 'text-blue-500' },
-    { label: 'Samples', value: (samplesRes.data ?? []).length,       icon: FlaskConical,  color: 'text-green-500' },
-    { label: 'Tests',   value: (testsRes.data ?? []).length,         icon: TestTube,      color: 'text-yellow-500' },
-    // The legacy `results` table was never written to, so this card always
-    // read 0 — sample_tests is where results actually live.
-    { label: 'Results', value: workflowRows.length,                  icon: BarChart3,     color: 'text-purple-500' },
-  ]
+  const openWork = count('awaiting_entry') + count('returned') + count('awaiting_review') + count('in_review')
+  const summary = openWork === 0
+    ? 'No results are currently open. The bench is clear.'
+    : `${openWork} result${openWork === 1 ? '' : 's'} in progress across the laboratory` +
+      (overdueOrders > 0 ? ` · ${overdueOrders} order${overdueOrders === 1 ? '' : 's'} past due` : '')
 
   return (
-    <div className="p-6 bg-gray-50 min-h-full">
-      {/* Header */}
-      <div className="flex items-start justify-between mb-6">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-800">Welcome {displayName}</h1>
-          <p className="text-sm text-gray-500 mt-1 max-w-2xl">
-            This dashboard gives a clear overview of lab operations, track orders, samples, tests, and results at a glance.
-            Clickable charts let you explore data, helping you monitor workflows and make informed decisions.
-          </p>
-        </div>
-        <div className="flex items-center gap-1 bg-white border border-gray-200 rounded-lg p-1 shrink-0 ml-4">
-          {Object.entries(PERIOD_LABELS).map(([key, label]) => (
-            <Link
-              key={key}
-              href={`/admin/dashboard?period=${key}`}
-              className={`px-3 py-1.5 rounded text-sm font-medium transition ${
-                period === key ? 'bg-blue-600 text-white' : 'text-gray-500 hover:text-gray-800'
-              }`}
-            >
-              {label}
-            </Link>
-          ))}
-        </div>
-      </div>
-
-      {/* Quick action cards */}
-      <div className="grid grid-cols-4 gap-4 mb-6">
-        {quickActions.map(action => (
-          <Link
-            key={action.label}
-            href={action.href}
-            className={`${action.bg} hover:opacity-90 text-white rounded-lg p-6 flex flex-col items-center justify-center text-center gap-3 transition shadow-sm`}
-          >
-            <div className="bg-white/20 rounded-full p-3">
-              <action.icon className="w-7 h-7" />
+    <Page wide>
+      <PageHeader
+        title={`Welcome, ${displayName}`}
+        meta={<>{today} · {summary}</>}
+        actions={
+          <>
+            <div className="hidden items-center rounded-md border border-line bg-surface p-0.5 shadow-xs sm:flex">
+              {Object.entries(PERIOD_LABELS).map(([key, label]) => (
+                <Link
+                  key={key}
+                  href={`/admin/dashboard?period=${key}`}
+                  className={`rounded px-2.5 py-1 text-[12px] font-medium transition-colors ${
+                    period === key ? 'bg-brand-600 text-white' : 'text-ink-3 hover:text-ink'
+                  }`}
+                >
+                  {label}
+                </Link>
+              ))}
             </div>
-            <div>
-              <p className="font-bold text-lg leading-tight">{action.label}</p>
-              <p className="text-xs text-white/80 mt-0.5">{action.sub}</p>
-            </div>
-          </Link>
-        ))}
-      </div>
-
-      {/* Stats row */}
-      <div className="grid grid-cols-4 gap-4 mb-6">
-        {statsCards.map(card => (
-          <div key={card.label} className="bg-white rounded-lg border border-gray-200 p-4 flex items-center gap-4 shadow-sm">
-            <div className="bg-gray-50 rounded-full p-3">
-              <card.icon className={`w-6 h-6 ${card.color}`} />
-            </div>
-            <div>
-              <p className="text-gray-500 text-sm">{card.label}</p>
-              <p className={`text-2xl font-bold ${card.color}`}>{card.value}</p>
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {/* Workflow indicators */}
-      <WorkflowIndicators rows={workflowRows} basePath="/admin" />
-
-      {/* Charts */}
-      <DashboardCharts
-        statusData={chartStatusData}
-        timelineData={chartTimelineData}
-        periodLabel={periodLabel}
+            <ButtonLink href="/admin/orders/new" variant="primary">
+              <Plus className="h-3.5 w-3.5" /> New order
+            </ButtonLink>
+          </>
+        }
       />
-    </div>
+
+      {/* KPIs */}
+      <div className="mb-6 grid grid-cols-2 gap-2.5 md:grid-cols-3 xl:grid-cols-6">
+        <StatTile label="Orders"         value={orders.length}          hint={periodLabel} icon={ClipboardList} href="/admin/orders" />
+        <StatTile label="Samples"        value={(samplesRes.data ?? []).length} hint={periodLabel} icon={FlaskConical} />
+        <StatTile label="Tests pending"  value={count('awaiting_entry')} icon={FileEdit}   href="/admin/work-queue?status=pending" />
+        <StatTile label="Reviews pending" value={count('in_review')}     icon={ShieldCheck} href="/admin/review-queue" />
+        <StatTile label="Reports ready"  value={count('approved')}       icon={FileText}   href="/admin/work-queue?status=approved" />
+        <StatTile label="Overdue"        value={overdueOrders}           icon={AlertTriangle} tone="crit" href="/admin/orders" />
+      </div>
+
+      <Section title="Order lifecycle">
+        <Pipeline stages={stages} />
+      </Section>
+
+      <div className="grid gap-6 lg:grid-cols-5">
+        {/* My work */}
+        <div className="lg:col-span-2">
+          <Section title="My work">
+            <Panel className="overflow-hidden">
+              <WorkItem label="Reviews assigned to me" count={mine.assignedToMe} tone="review" href="/admin/review-queue?reviewer=me" />
+              <WorkItem label="Overdue reviews"        count={mine.overdueReviews} tone="crit" href="/admin/review-queue?reviewer=me" />
+              <WorkItem label="Returned for changes"   count={mine.returned} tone="crit" href="/admin/work-queue?status=returned" />
+              <WorkItem label="Results awaiting entry" count={mine.awaitingEntry} tone="warn" href="/admin/work-queue?status=pending" />
+              <WorkItem label="Ready for release"      count={mine.readyToRelease} tone="ok" href="/admin/work-queue?status=approved" />
+            </Panel>
+          </Section>
+        </div>
+
+        {/* Recent activity */}
+        <div className="lg:col-span-3">
+          <Section
+            title="Recent activity"
+            actions={<Link href="/admin/system-logs" className="text-[12px] font-medium text-brand-600 hover:text-brand-700">Full audit log →</Link>}
+          >
+            <Panel className="overflow-hidden">
+              {audit.length === 0 ? (
+                <EmptyState icon={Activity} title="No recorded activity yet" compact />
+              ) : (
+                <ul className="divide-y divide-line">
+                  {audit.map(entry => {
+                    const meta = ACTION_LABEL[entry.action] ?? { label: entry.action, tone: 'neutral' as const }
+                    return (
+                      <li key={entry.id} className="flex items-center gap-3 px-3.5 py-2">
+                        <Badge tone={meta.tone}>{meta.label}</Badge>
+                        <span className="min-w-0 flex-1 truncate text-[12px] text-ink-3">
+                          <span className="text-ink-2">{entry.table_name}</span>
+                          {' · '}
+                          <Mono className="text-ink-4">{String(entry.record_id).slice(0, 8)}</Mono>
+                        </span>
+                        <span className="hidden shrink-0 text-[12px] text-ink-3 sm:block">
+                          {personName(entry.profiles)}
+                        </span>
+                        <span className="shrink-0 tabular text-[11px] text-ink-4">
+                          {waitingTime(entry.created_at)} ago
+                        </span>
+                      </li>
+                    )
+                  })}
+                </ul>
+              )}
+            </Panel>
+          </Section>
+        </div>
+      </div>
+
+      {/* Analytics — omitted entirely when there is nothing to plot,
+          rather than showing empty chart frames. */}
+      {hasChartData && (
+        <Section title="Analytics" description={`Order volume over the selected ${periodLabel.toLowerCase()}`}>
+          <DashboardCharts
+            statusData={chartStatusData}
+            timelineData={chartTimelineData}
+            periodLabel={periodLabel}
+          />
+        </Section>
+      )}
+    </Page>
   )
 }

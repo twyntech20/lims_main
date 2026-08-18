@@ -1,11 +1,12 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
-import { FlaskConical } from 'lucide-react'
+import { Filter } from 'lucide-react'
 import WorkQueueTable from '@/components/work-queue/WorkQueueTable'
 import { RESULT_QUEUE_SELECT, REVIEWER_SELECT } from '@/lib/queries/result-queue'
-import { workflowState, type WorkflowState } from '@/lib/workflow'
+import { workflowState, isOverdue, type WorkflowState } from '@/lib/workflow'
+import { Page, PageHeader, Tabs, Toolbar, Select, SearchField, buttonClass } from '@/components/ui/primitives'
 
-interface SearchParams { status?: string; category?: string }
+interface SearchParams { status?: string; category?: string; priority?: string; due?: string; q?: string }
 interface Props { searchParams: Promise<SearchParams> }
 
 const TAB_STATE: Record<string, WorkflowState> = {
@@ -18,7 +19,8 @@ const TAB_STATE: Record<string, WorkflowState> = {
 }
 
 export default async function AnalystWorkQueuePage({ searchParams }: Props) {
-  const { status, category } = await searchParams
+  const sp = await searchParams
+  const { status, category, priority, due, q } = sp
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
@@ -42,12 +44,12 @@ export default async function AnalystWorkQueuePage({ searchParams }: Props) {
 
   const { data: sampleTests } = await query
 
-  // Show only tests for orders assigned to this analyst, OR tests they
-  // entered themselves — approved results stay visible so Analyst 1 sees
-  // the outcome of their own submissions, not just the open work.
+  // Only tests on orders assigned to this analyst, or tests they entered
+  // themselves — approved results stay visible so Analyst 1 sees the
+  // outcome of their own submissions, not just the open work.
   const mine = ((sampleTests ?? []) as any[]).filter(st =>
     st.samples?.orders?.assigned_analyst_id === user.id ||
-    st.entered_by_profile?.id === user.id
+    st.entered_by_profile?.id === user.id,
   )
 
   const stateOf = (st: any): WorkflowState => workflowState({
@@ -57,77 +59,80 @@ export default async function AnalystWorkQueuePage({ searchParams }: Props) {
     order_released_at: st.samples?.orders?.released_at,
   })
 
-  const filtered = status ? mine.filter(st => stateOf(st) === TAB_STATE[status]) : mine
-  const countState = (s: WorkflowState) => mine.filter(st => stateOf(st) === s).length
+  const scoped = mine.filter(st => {
+    if (priority && st.samples?.orders?.priority !== priority) return false
+    if (due === 'overdue' && !isOverdue(st.samples?.orders?.date_due)) return false
+    if (q) {
+      const hay = [st.samples?.orders?.order_number, st.samples?.sample_id, st.tests?.name, st.tests?.code]
+        .filter(Boolean).join(' ').toLowerCase()
+      if (!hay.includes(q.toLowerCase())) return false
+    }
+    return true
+  })
+
+  const rows = status ? scoped.filter(st => stateOf(st) === TAB_STATE[status]) : scoped
+  const n = (s: WorkflowState) => scoped.filter(st => stateOf(st) === s).length
+
+  const href = (tab: string) => {
+    const p = new URLSearchParams(Object.entries(sp).filter(([k, v]) => v && k !== 'status') as [string, string][])
+    if (tab) p.set('status', tab)
+    const qs = p.toString()
+    return `/analyst/work-queue${qs ? `?${qs}` : ''}`
+  }
 
   const tabs = [
-    { key: '',         label: 'All',              count: mine.length },
-    { key: 'pending',  label: 'Awaiting entry',   count: countState('awaiting_entry') },
-    { key: 'returned', label: 'Returned to me',   count: countState('returned') },
-    { key: 'entered',  label: 'Awaiting review',  count: countState('awaiting_review') },
-    { key: 'reviewed', label: 'In review',        count: countState('in_review') },
-    { key: 'approved', label: 'Ready to release', count: countState('approved') },
-    { key: 'released', label: 'Released',         count: countState('released') },
+    { key: '',         label: 'All',           href: href(''),         count: scoped.length,        active: !status },
+    { key: 'pending',  label: 'Pending',       href: href('pending'),  count: n('awaiting_entry'),  active: status === 'pending' },
+    { key: 'returned', label: 'Returned to me',href: href('returned'), count: n('returned'),        active: status === 'returned' },
+    { key: 'entered',  label: 'In progress',   href: href('entered'),  count: n('awaiting_review'), active: status === 'entered' },
+    { key: 'reviewed', label: 'Review',        href: href('reviewed'), count: n('in_review'),       active: status === 'reviewed' },
+    { key: 'approved', label: 'Approved',      href: href('approved'), count: n('approved'),        active: status === 'approved' },
+    { key: 'released', label: 'Released',      href: href('released'), count: n('released'),        active: status === 'released' },
   ]
 
+  const actionable = n('awaiting_entry') + n('returned') + n('awaiting_review')
+
   return (
-    <div className="p-6 max-w-7xl mx-auto">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
-          <FlaskConical className="w-6 h-6 text-blue-600" />
-          My Work Queue
-        </h1>
-        <p className="text-slate-500 text-sm mt-1">
-          {countState('awaiting_entry')} to enter · {countState('returned')} returned to you ·{' '}
-          {countState('awaiting_review')} to assign · {countState('in_review')} with a reviewer
-        </p>
-      </div>
+    <Page wide>
+      <PageHeader
+        title="My Work Queue"
+        meta={
+          actionable === 0
+            ? 'You have nothing waiting. Approved work stays listed for reference.'
+            : <>{actionable} item{actionable === 1 ? '' : 's'} requiring your attention · {n('in_review')} with reviewers</>
+        }
+      />
 
-      {/* Status Tabs */}
-      <div className="flex gap-1 mb-4 bg-slate-100 rounded-xl p-1 w-fit flex-wrap">
-        {tabs.map(tab => {
-          const active = (status ?? '') === tab.key
-          return (
-            <a key={tab.key}
-              href={`/analyst/work-queue${tab.key ? `?status=${tab.key}` : ''}`}
-              className={`px-4 py-1.5 rounded-lg text-sm font-medium transition flex items-center gap-1.5 ${
-                active
-                  ? 'bg-white text-slate-900 shadow-sm'
-                  : 'text-slate-500 hover:text-slate-700'
-              }`}>
-              {tab.label}
-              <span className={`text-xs px-1.5 py-0.5 rounded-full ${
-                active ? 'bg-blue-100 text-blue-700' : 'bg-slate-200 text-slate-500'
-              }`}>{tab.count}</span>
-            </a>
-          )
-        })}
-      </div>
+      <div className="mb-3"><Tabs items={tabs} /></div>
 
-      {/* Category filter */}
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 mb-6">
-        <form className="flex flex-wrap gap-3">
-          {status && <input type="hidden" name="status" value={status} />}
-          <select name="category" defaultValue={category ?? ''}
-            className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+      <form>
+        {status && <input type="hidden" name="status" value={status} />}
+        <Toolbar>
+          <SearchField defaultValue={q} placeholder="Search order, sample or test…" />
+          <Select name="category" defaultValue={category ?? ''} aria-label="Category">
             <option value="">All categories</option>
             <option value="chemistry">Chemistry</option>
             <option value="microbiology">Microbiology</option>
-          </select>
-          <button type="submit"
-            className="bg-slate-800 hover:bg-slate-700 text-white font-medium px-4 py-2 rounded-xl text-sm transition">
-            Filter
+          </Select>
+          <Select name="priority" defaultValue={priority ?? ''} aria-label="Priority">
+            <option value="">All priorities</option>
+            <option value="same_day">STAT (same day)</option>
+            <option value="priority_24h">24 hour</option>
+            <option value="priority_48h">48 hour</option>
+            <option value="normal">Normal</option>
+          </Select>
+          <Select name="due" defaultValue={due ?? ''} aria-label="Due date">
+            <option value="">Any due date</option>
+            <option value="overdue">Overdue</option>
+          </Select>
+          <button type="submit" className={buttonClass('secondary', 'sm')}>
+            <Filter className="h-3 w-3" /> Apply
           </button>
-          {category && (
-            <a href={`/analyst/work-queue${status ? `?status=${status}` : ''}`}
-              className="px-4 py-2 text-sm text-slate-500 hover:text-slate-700 transition">
-              Clear
-            </a>
-          )}
-        </form>
-      </div>
+          <span className="ml-auto text-[12px] text-ink-3 tabular">{rows.length} shown</span>
+        </Toolbar>
+      </form>
 
-      <WorkQueueTable rows={filtered as any} orderBasePath="/analyst/orders" reviewers={reviewerProfiles ?? []} />
-    </div>
+      <WorkQueueTable rows={rows as any} orderBasePath="/analyst/orders" reviewers={reviewerProfiles ?? []} />
+    </Page>
   )
 }

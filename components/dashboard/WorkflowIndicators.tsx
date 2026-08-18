@@ -1,6 +1,7 @@
-import Link from 'next/link'
 import { FileEdit, Undo2, ClipboardCheck, ShieldCheck, Send, AlertTriangle, Package } from 'lucide-react'
 import { workflowState, isOverdue } from '@/lib/workflow'
+import { StatTile } from '@/components/ui/metrics'
+import { Section } from '@/components/ui/primitives'
 
 export interface IndicatorRow {
   status: string
@@ -35,34 +36,30 @@ export default function WorkflowIndicators({
   const count = (s: string) => states.filter(x => x.state === s).length
   const overdueReviews = states.filter(x => x.state === 'in_review' && x.overdue).length
 
-  const cards = [
-    { label: 'Awaiting entry',   value: count('awaiting_entry'),  icon: FileEdit,      color: 'text-slate-600 bg-slate-100',    href: `${basePath}/work-queue?status=pending` },
-    { label: 'Returned',         value: count('returned'),        icon: Undo2,         color: 'text-red-600 bg-red-50',         href: `${basePath}/work-queue?status=returned` },
-    { label: 'Awaiting review',  value: count('awaiting_review'), icon: ClipboardCheck,color: 'text-yellow-600 bg-yellow-50',   href: `${basePath}/work-queue?status=entered` },
-    { label: 'In review',        value: count('in_review'),       icon: ShieldCheck,   color: 'text-blue-600 bg-blue-50',       href: `${basePath}/review-queue` },
-    { label: 'Ready to release', value: count('approved'),        icon: Send,          color: 'text-emerald-600 bg-emerald-50', href: `${basePath}/work-queue?status=approved` },
-    { label: 'Released',         value: count('released'),        icon: Package,       color: 'text-green-700 bg-green-50',     href: `${basePath}/work-queue?status=released` },
-    { label: 'Overdue reviews',  value: overdueReviews,           icon: AlertTriangle, color: 'text-orange-600 bg-orange-50',   href: `${basePath}/review-queue` },
+  const tiles = [
+    { label: 'Awaiting entry',  value: count('awaiting_entry'),  icon: FileEdit,      href: `${basePath}/work-queue?status=pending` },
+    { label: 'Returned',        value: count('returned'),        icon: Undo2,         href: `${basePath}/work-queue?status=returned`,  tone: 'crit' as const },
+    { label: 'Awaiting review', value: count('awaiting_review'), icon: ClipboardCheck,href: `${basePath}/work-queue?status=entered` },
+    { label: 'In review',       value: count('in_review'),       icon: ShieldCheck,   href: `${basePath}/review-queue` },
+    { label: 'Ready to release',value: count('approved'),        icon: Send,          href: `${basePath}/work-queue?status=approved` },
+    { label: 'Released',        value: count('released'),        icon: Package,       href: `${basePath}/work-queue?status=released` },
+    { label: 'Overdue reviews', value: overdueReviews,           icon: AlertTriangle, href: `${basePath}/review-queue`, tone: 'crit' as const },
   ]
 
   return (
-    <div className="mb-6">
-      <h2 className="text-sm font-semibold text-slate-500 uppercase tracking-wide mb-3">Result workflow</h2>
-      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
-        {cards.map(card => (
-          <Link
-            key={card.label}
-            href={card.href}
-            className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 hover:border-slate-300 hover:shadow transition"
-          >
-            <div className={`inline-flex p-1.5 rounded-lg mb-2 ${card.color}`}>
-              <card.icon className="w-4 h-4" />
-            </div>
-            <p className={`text-2xl font-bold ${card.value > 0 ? 'text-slate-900' : 'text-slate-300'}`}>{card.value}</p>
-            <p className="text-[11px] text-slate-500 mt-0.5 leading-tight">{card.label}</p>
-          </Link>
+    <Section title="Result workflow">
+      <div className="grid grid-cols-2 gap-2.5 md:grid-cols-4 xl:grid-cols-7">
+        {tiles.map(t => (
+          <StatTile
+            key={t.label}
+            label={t.label}
+            value={t.value}
+            icon={t.icon}
+            href={t.href}
+            tone={t.tone ?? 'neutral'}
+          />
         ))}
       </div>
-    </div>
+    </Section>
   )
 }

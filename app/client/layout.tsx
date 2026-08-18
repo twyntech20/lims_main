@@ -23,13 +23,13 @@ export default async function ClientLayout({ children }: { children: React.React
     .eq('is_read', false)
 
   return (
-    <div className="flex h-screen bg-gray-100 overflow-hidden">
+    <div className="flex h-screen flex-col overflow-hidden bg-canvas lg:flex-row">
       <Sidebar
         role="client"
         userName={[(profile as any).first_name, (profile as any).company_name].filter(Boolean)[0] || user.email || ''}
         unreadCount={count ?? 0}
       />
-      <main className="flex-1 overflow-y-auto">
+      <main className="min-w-0 flex-1 overflow-y-auto">
         {children}
       </main>
     </div>

@@ -1,15 +1,16 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
-import { ClipboardCheck } from 'lucide-react'
+import { Filter } from 'lucide-react'
 import ReviewQueueTable from '@/components/work-queue/ReviewQueueTable'
 import { RESULT_QUEUE_SELECT } from '@/lib/queries/result-queue'
 import { isOverdue } from '@/lib/workflow'
+import { Page, PageHeader, Toolbar, Select, SearchField, buttonClass } from '@/components/ui/primitives'
 
-interface SearchParams { category?: string; priority?: string }
+interface SearchParams { category?: string; priority?: string; due?: string; q?: string }
 interface Props { searchParams: Promise<SearchParams> }
 
 export default async function AnalystReviewQueuePage({ searchParams }: Props) {
-  const { category, priority } = await searchParams
+  const { category, priority, due, q } = await searchParams
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
@@ -33,49 +34,58 @@ export default async function AnalystReviewQueuePage({ searchParams }: Props) {
 
   const { data: sampleTests } = await query
 
-  const filtered = ((sampleTests ?? []) as any[]).filter(st =>
-    !priority || st.samples?.orders?.priority === priority
-  )
-  const overdueCount = filtered.filter(st => isOverdue(st.samples?.orders?.date_due)).length
+  const rows = ((sampleTests ?? []) as any[]).filter(st => {
+    if (priority && st.samples?.orders?.priority !== priority) return false
+    if (due === 'overdue' && !isOverdue(st.samples?.orders?.date_due)) return false
+    if (q) {
+      const hay = [st.samples?.orders?.order_number, st.samples?.sample_id, st.tests?.name, st.tests?.code]
+        .filter(Boolean).join(' ').toLowerCase()
+      if (!hay.includes(q.toLowerCase())) return false
+    }
+    return true
+  })
+
+  const overdueCount = rows.filter(st => isOverdue(st.samples?.orders?.date_due)).length
 
   return (
-    <div className="p-6 max-w-7xl mx-auto">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
-          <ClipboardCheck className="w-6 h-6 text-purple-600" />
-          Review Queue
-        </h1>
-        <p className="text-slate-500 text-sm mt-1">
-          {filtered.length} result{filtered.length !== 1 ? 's' : ''} assigned to you for review
-          {overdueCount > 0 && <span className="text-red-600 font-medium"> · {overdueCount} past the order due date</span>}
-        </p>
-      </div>
+    <Page wide>
+      <PageHeader
+        title="Review Queue"
+        meta={
+          <>
+            {rows.length} result{rows.length === 1 ? '' : 's'} awaiting your review
+            {overdueCount > 0 && <> · <span className="font-medium text-crit-fg">{overdueCount} past the order due date</span></>}
+          </>
+        }
+      />
 
-      {/* Filters */}
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 mb-6">
-        <form className="flex flex-wrap gap-3">
-          <select name="category" defaultValue={category ?? ''}
-            className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+      <form>
+        <Toolbar>
+          <SearchField defaultValue={q} placeholder="Search order, sample or test…" />
+          <Select name="category" defaultValue={category ?? ''} aria-label="Category">
             <option value="">All categories</option>
             <option value="chemistry">Chemistry</option>
             <option value="microbiology">Microbiology</option>
-          </select>
-          <select name="priority" defaultValue={priority ?? ''}
-            className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+          </Select>
+          <Select name="priority" defaultValue={priority ?? ''} aria-label="Priority">
             <option value="">All priorities</option>
+            <option value="same_day">STAT (same day)</option>
+            <option value="priority_24h">24 hour</option>
+            <option value="priority_48h">48 hour</option>
             <option value="normal">Normal</option>
-            <option value="priority_24h">Priority 24h</option>
-            <option value="priority_48h">Priority 48h</option>
-            <option value="same_day">Same Day</option>
-          </select>
-          <button type="submit"
-            className="bg-slate-800 hover:bg-slate-700 text-white font-medium px-4 py-2 rounded-xl text-sm transition">
-            Filter
+          </Select>
+          <Select name="due" defaultValue={due ?? ''} aria-label="Due date">
+            <option value="">Any due date</option>
+            <option value="overdue">Overdue</option>
+          </Select>
+          <button type="submit" className={buttonClass('secondary', 'sm')}>
+            <Filter className="h-3 w-3" /> Apply
           </button>
-        </form>
-      </div>
+          <span className="ml-auto text-[12px] text-ink-3 tabular">{rows.length} shown</span>
+        </Toolbar>
+      </form>
 
-      <ReviewQueueTable rows={filtered as any} orderBasePath="/analyst/orders" />
-    </div>
+      <ReviewQueueTable rows={rows as any} orderBasePath="/analyst/orders" />
+    </Page>
   )
 }

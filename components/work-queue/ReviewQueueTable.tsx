@@ -1,13 +1,19 @@
 'use client'
 
 import { useState, useTransition } from 'react'
+import Link from 'next/link'
 import { approveSampleTest, rejectToAnalyst } from '@/app/actions/results'
-import { CheckCircle2, XCircle, ChevronDown, ChevronRight, ClipboardCheck, Loader2, AlertTriangle, Undo2 } from 'lucide-react'
-import toast, { Toaster } from 'react-hot-toast'
 import {
-  workflowState, WORKFLOW_LABEL, WORKFLOW_BADGE,
-  personName, waitingTime, isOverdue, MIN_COMMENT_LENGTH,
+  CheckCircle2, XCircle, Loader2, AlertTriangle, Undo2, ClipboardCheck,
+  History, ChevronDown,
+} from 'lucide-react'
+import toast, { Toaster } from 'react-hot-toast'
+import { cn } from '@/lib/utils'
+import {
+  workflowState, WORKFLOW_LABEL, personName, waitingTime, isOverdue,
+  MIN_COMMENT_LENGTH, type WorkflowState,
 } from '@/lib/workflow'
+import { Badge, Mono, Table, Th, Td, Tr, TableWrap, EmptyState, buttonClass, FIELD, type Tone } from '@/components/ui/primitives'
 
 type Person = { first_name: string | null; last_name: string | null; email: string } | null
 
@@ -48,6 +54,8 @@ type SampleTest = {
     code: string | null
     category: string
     unit: string | null
+    method?: string | null
+    mdl?: string | null
   } | null
   entered_by_profile: Person
   reviewed_by_profile: Person
@@ -55,22 +63,23 @@ type SampleTest = {
   returned_by_profile: Person
 }
 
-const PRIORITY_BADGE: Record<string, string> = {
-  normal:       'bg-slate-100 text-slate-600',
-  priority_24h: 'bg-orange-100 text-orange-700',
-  priority_48h: 'bg-yellow-100 text-yellow-700',
-  same_day:     'bg-red-100 text-red-700',
+const STATE_TONE: Record<WorkflowState, Tone> = {
+  awaiting_entry: 'neutral', returned: 'crit', awaiting_review: 'warn',
+  in_review: 'review', approved: 'ok', released: 'solid',
 }
 
-const PRIORITY_LABEL: Record<string, string> = {
-  normal: 'Normal', priority_24h: '24h', priority_48h: '48h', same_day: 'STAT',
+const PRIORITY: Record<string, { label: string; tone: Tone }> = {
+  normal:       { label: 'Normal', tone: 'neutral' },
+  priority_48h: { label: '48 h',   tone: 'warn' },
+  priority_24h: { label: '24 h',   tone: 'warn' },
+  same_day:     { label: 'STAT',   tone: 'crit' },
 }
 
-function ReviewRow({ st }: { st: SampleTest }) {
+function ReviewRow({ st, orderBasePath }: { st: SampleTest; orderBasePath: string }) {
   const [approving, startApprove] = useTransition()
   const [rejecting, startReject]  = useTransition()
-  const [rejectNote, setRejectNote] = useState('')
-  const [showReject, setShowReject] = useState(false)
+  const [note, setNote] = useState('')
+  const [panel, setPanel] = useState<null | 'return' | 'detail'>(null)
 
   const order = st.samples?.orders ?? null
   const state = workflowState({
@@ -80,138 +89,194 @@ function ReviewRow({ st }: { st: SampleTest }) {
     order_released_at: order?.released_at,
   })
   const overdue = isOverdue(order?.date_due) && state === 'in_review'
+  const priority = PRIORITY[order?.priority ?? 'normal'] ?? PRIORITY.normal
+  const noteTooShort = note.trim().length < MIN_COMMENT_LENGTH
 
   function handleApprove() {
     startApprove(async () => {
-      try {
-        await approveSampleTest(st.id)
-        toast.success('Approved')
-      } catch (err: any) {
-        toast.error(err.message ?? 'Failed')
-      }
+      try { await approveSampleTest(st.id); toast.success('Result approved') }
+      catch (err: any) { toast.error(err.message ?? 'Failed') }
     })
   }
 
   function handleReject() {
     startReject(async () => {
       try {
-        await rejectToAnalyst(st.id, rejectNote)
+        await rejectToAnalyst(st.id, note)
         toast.success('Returned to the analyst')
-        setShowReject(false)
-        setRejectNote('')
-      } catch (err: any) {
-        toast.error(err.message ?? 'Failed')
-      }
+        setPanel(null); setNote('')
+      } catch (err: any) { toast.error(err.message ?? 'Failed') }
     })
   }
 
-  const displayResult = st.qualifier === 'ND' ? 'ND' : [st.qualifier, st.result].filter(Boolean).join(' ') || '—'
-  const noteTooShort = rejectNote.trim().length < MIN_COMMENT_LENGTH
+  const displayResult = st.qualifier === 'ND'
+    ? 'ND'
+    : [st.qualifier, st.result].filter(Boolean).join(' ') || '—'
 
   return (
     <>
-      <tr className="border-b border-slate-100 hover:bg-slate-50 transition">
-        <td className="px-4 py-3">
-          <div className="font-medium text-slate-900 text-sm">{st.tests?.name ?? '—'}</div>
-          {st.tests?.code && <div className="text-xs text-slate-400 font-mono">{st.tests.code}</div>}
-          <span className={`mt-0.5 inline-block text-xs px-1.5 py-0.5 rounded-full ${
-            st.tests?.category === 'microbiology' ? 'bg-green-50 text-green-700' : 'bg-blue-50 text-blue-700'
-          }`}>{st.tests?.category}</span>
-        </td>
-        <td className="px-3 py-3">
-          <span className="font-medium text-slate-900 text-sm">{displayResult}</span>
-          {st.unit && <span className="text-slate-400 text-xs ml-1">{st.unit}</span>}
-          <div className="text-xs text-slate-400 mt-0.5">
-            MDL {st.mdl || '—'} · DF {st.dilution_factor ?? 1}
+      <Tr flag={overdue ? 'warn' : undefined}>
+        <Td className="whitespace-nowrap">
+          {order?.id ? (
+            <Link href={`${orderBasePath}/${order.id}`} className="font-medium text-brand-600 hover:text-brand-700">
+              <Mono>{order.order_number ?? 'Order'}</Mono>
+            </Link>
+          ) : '—'}
+          <div className="mt-0.5 max-w-[150px] truncate text-[11px] text-ink-4">
+            {order?.clients?.client_name ?? order?.customer_name ?? ''}
           </div>
-        </td>
-        <td className="px-3 py-3 text-xs text-slate-500 max-w-48">
-          {st.analyst_notes ? <span className="italic">{st.analyst_notes}</span> : '—'}
-        </td>
-        <td className="px-3 py-3 text-xs text-slate-500">{personName(st.entered_by_profile)}</td>
-        <td className="px-3 py-3 text-xs text-slate-500">{personName(st.assigned_reviewer_profile)}</td>
-        <td className="px-3 py-3">
-          <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${WORKFLOW_BADGE[state]}`}>
-            {WORKFLOW_LABEL[state]}
-          </span>
-          {(st.review_round ?? 1) > 1 && (
-            <div className="text-[11px] text-slate-400 mt-1">Round {st.review_round}</div>
-          )}
-        </td>
-        <td className="px-3 py-3 text-xs">
-          <span className={overdue ? 'text-red-600 font-semibold' : 'text-slate-500'}>
+        </Td>
+
+        <Td className="whitespace-nowrap"><Mono className="text-ink">{st.samples?.sample_id ?? '—'}</Mono></Td>
+
+        <Td>
+          <div className="max-w-[220px] truncate font-medium text-ink">{st.tests?.name ?? '—'}</div>
+          <div className="mt-0.5 text-[11px] text-ink-4">
+            {st.tests?.code && <Mono className="text-[11px]">{st.tests.code}</Mono>}
+            {st.tests?.method && <span> · {st.tests.method}</span>}
+          </div>
+        </Td>
+
+        {/* The value under review — the reason this screen exists. */}
+        <Td className="whitespace-nowrap tabular">
+          <span className="font-medium text-ink">{displayResult}</span>{' '}
+          <span className="text-ink-4">{st.unit ?? ''}</span>
+          <div className="mt-0.5 text-[11px] text-ink-4">
+            MDL {st.mdl ?? st.tests?.mdl ?? '—'} · DF {st.dilution_factor ?? 1}
+          </div>
+        </Td>
+
+        <Td className="whitespace-nowrap text-[12px]">{personName(st.entered_by_profile)}</Td>
+
+        <Td className="whitespace-nowrap text-[12px]">
+          {personName(st.assigned_reviewer_profile)}
+          {(st.review_round ?? 1) > 1 && <div className="mt-0.5 text-[11px] text-ink-4">round {st.review_round}</div>}
+        </Td>
+
+        <Td className="whitespace-nowrap">
+          {order?.priority === 'normal'
+            ? <span className="text-[12px] text-ink-4">Normal</span>
+            : <Badge tone={priority.tone} dot>{priority.label}</Badge>}
+        </Td>
+
+        <Td className="whitespace-nowrap tabular text-[12px] text-ink-2">
+          {st.entered_at ? new Date(st.entered_at).toLocaleDateString('en-AU', { day: '2-digit', month: 'short' }) : '—'}
+        </Td>
+
+        <Td className="whitespace-nowrap tabular">
+          <span className={cn('text-[12px]', overdue ? 'font-medium text-crit-fg' : 'text-ink-2')}>
             {waitingTime(st.entered_at)}
           </span>
           {overdue && (
-            <div className="text-[11px] text-red-500 flex items-center gap-0.5 mt-0.5">
-              <AlertTriangle className="w-3 h-3" /> Past due
+            <div className="mt-0.5 flex items-center gap-1 text-[11px] text-crit-fg">
+              <AlertTriangle className="h-3 w-3" /> past due
             </div>
           )}
-        </td>
-        <td className="px-3 py-3 w-48">
-          {state === 'in_review' && (
-            <div className="flex gap-1.5">
-              <button onClick={handleApprove} disabled={approving}
-                className="flex items-center gap-1 bg-green-600 hover:bg-green-500 disabled:bg-green-300 text-white text-xs font-medium px-3 py-1.5 rounded-lg transition">
-                {approving ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCircle2 className="w-3 h-3" />}
-                {approving ? '…' : 'Approve'}
+        </Td>
+
+        <Td className="whitespace-nowrap">
+          <Badge tone={STATE_TONE[state]} dot>{WORKFLOW_LABEL[state]}</Badge>
+        </Td>
+
+        <Td className="whitespace-nowrap">
+          {state === 'in_review' ? (
+            <div className="flex items-center gap-1.5">
+              <button onClick={handleApprove} disabled={approving} className={buttonClass('primary', 'sm')}>
+                {approving ? <Loader2 className="h-3 w-3 animate-spin" /> : <CheckCircle2 className="h-3 w-3" />}
+                Approve
               </button>
-              <button onClick={() => setShowReject(v => !v)}
-                className="flex items-center gap-1 bg-red-50 hover:bg-red-100 text-red-600 text-xs font-medium px-3 py-1.5 rounded-lg transition border border-red-200">
-                <XCircle className="w-3 h-3" />
-                Return
+              <button
+                onClick={() => setPanel(p => (p === 'return' ? null : 'return'))}
+                className={buttonClass('danger', 'sm')}
+              >
+                <XCircle className="h-3 w-3" /> Return
+              </button>
+              <button
+                onClick={() => setPanel(p => (p === 'detail' ? null : 'detail'))}
+                className={buttonClass('ghost', 'sm')}
+                aria-label="Show result detail and history"
+              >
+                <ChevronDown className={cn('h-3.5 w-3.5 transition-transform', panel === 'detail' && 'rotate-180')} />
               </button>
             </div>
-          )}
-          {(state === 'awaiting_review' || state === 'returned') && (
-            <span className="text-xs text-slate-400">With the analyst</span>
-          )}
-          {(state === 'approved' || state === 'released') && (
-            <span className="text-xs text-green-600 flex items-center gap-1">
-              <CheckCircle2 className="w-3 h-3" /> {WORKFLOW_LABEL[state]}
+          ) : state === 'awaiting_review' || state === 'returned' ? (
+            <span className="text-[12px] text-ink-3">With the analyst</span>
+          ) : (
+            <span className="flex items-center gap-1.5 text-[12px] text-ok-fg">
+              <CheckCircle2 className="h-3 w-3" /> {WORKFLOW_LABEL[state]}
             </span>
           )}
-        </td>
-      </tr>
+        </Td>
+      </Tr>
 
-      {/* Previous return on this result — review history is not erased when
-          the analyst re-submits, so the reviewer can see what was already
-          raised once. */}
+      {/* Earlier return on this result — review history is not erased when
+          the analyst re-submits. */}
       {st.rejection_reason && (
-        <tr className="border-b border-slate-100 bg-amber-50">
-          <td colSpan={8} className="px-4 py-2">
-            <div className="flex items-start gap-2 text-xs">
-              <Undo2 className="w-3.5 h-3.5 text-amber-600 mt-0.5 shrink-0" />
-              <div>
-                <span className="font-semibold text-amber-800">
+        <tr className="bg-warn-bg/40">
+          <td colSpan={11} className="border-b border-line px-3 pb-2 pt-0">
+            <div className="flex items-start gap-2 rounded-md border border-warn-line bg-surface px-2.5 py-1.5 text-[12px]">
+              <History className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warn-fg" />
+              <p className="text-ink-2">
+                <span className="font-medium text-warn-fg">
                   Previously returned by {personName(st.returned_by_profile)}:
                 </span>{' '}
-                <span className="text-amber-900">{st.rejection_reason}</span>
-              </div>
+                {st.rejection_reason}
+              </p>
             </div>
           </td>
         </tr>
       )}
 
-      {showReject && (
-        <tr className="border-b border-slate-100 bg-red-50">
-          <td colSpan={8} className="px-4 py-3">
-            <div className="flex items-center gap-3">
-              <span className="text-sm font-medium text-red-700 shrink-0">Reason for return:</span>
-              <input
-                value={rejectNote}
-                onChange={e => setRejectNote(e.target.value)}
-                placeholder={`Explain what needs to be corrected (min ${MIN_COMMENT_LENGTH} characters)…`}
-                className="flex-1 bg-white border border-red-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-red-400"
-              />
-              <button onClick={handleReject} disabled={rejecting || noteTooShort}
+      {panel === 'detail' && (
+        <tr className="bg-surface-muted">
+          <td colSpan={11} className="border-b border-line px-3 py-3">
+            <dl className="grid grid-cols-2 gap-x-8 gap-y-2 text-[12px] md:grid-cols-4">
+              <Detail label="Analyst notes" value={st.analyst_notes ?? '—'} />
+              <Detail label="Matrix" value={st.samples?.matrix_type?.replace(/_/g, ' ') ?? '—'} />
+              <Detail label="Sample description" value={st.samples?.description ?? '—'} />
+              <Detail label="Collected" value={st.samples?.collection_date
+                ? new Date(st.samples.collection_date).toLocaleDateString() : '—'} />
+              <Detail label="Entered" value={st.entered_at ? new Date(st.entered_at).toLocaleString() : '—'} />
+              <Detail label="Review round" value={String(st.review_round ?? 1)} />
+              <Detail label="Category" value={st.tests?.category ?? '—'} />
+              <Detail label="Method" value={st.tests?.method ?? '—'} />
+            </dl>
+            <div className="mt-3 flex gap-2">
+              {order?.id && (
+                <Link href={`${orderBasePath}/${order.id}`} className={buttonClass('secondary', 'sm')}>
+                  View order
+                </Link>
+              )}
+            </div>
+          </td>
+        </tr>
+      )}
+
+      {panel === 'return' && (
+        <tr className="bg-crit-bg/40">
+          <td colSpan={11} className="border-b border-line px-3 py-3">
+            <div className="flex flex-wrap items-end gap-2">
+              <label className="min-w-[280px] flex-1">
+                <span className="mb-1 block text-[11px] font-medium uppercase tracking-[0.05em] text-crit-fg">
+                  Reason for returning this result
+                </span>
+                <input
+                  value={note}
+                  onChange={e => setNote(e.target.value)}
+                  placeholder={`Explain what needs to be corrected (min ${MIN_COMMENT_LENGTH} characters)…`}
+                  className={cn(FIELD, 'w-full border-crit-line')}
+                />
+              </label>
+              <button
+                onClick={handleReject}
+                disabled={rejecting || noteTooShort}
                 title={noteTooShort ? `At least ${MIN_COMMENT_LENGTH} characters are required` : undefined}
-                className="bg-red-600 hover:bg-red-500 disabled:bg-red-300 text-white text-xs font-medium px-4 py-2 rounded-lg transition flex items-center gap-1 shrink-0">
-                {rejecting ? <Loader2 className="w-3 h-3 animate-spin" /> : null}
-                {rejecting ? 'Sending…' : 'Send back'}
+                className={buttonClass('danger', 'md')}
+              >
+                {rejecting && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                <Undo2 className="h-3.5 w-3.5" /> Send back to analyst
               </button>
-              <button onClick={() => setShowReject(false)}
-                className="text-slate-400 hover:text-slate-600 text-xs shrink-0">Cancel</button>
+              <button onClick={() => setPanel(null)} className={buttonClass('ghost', 'md')}>Cancel</button>
             </div>
           </td>
         </tr>
@@ -220,137 +285,58 @@ function ReviewRow({ st }: { st: SampleTest }) {
   )
 }
 
-type Group = {
-  sampleKey: string
-  sample: SampleTest['samples']
-  tests: SampleTest[]
+function Detail({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <dt className="text-[11px] uppercase tracking-[0.05em] text-ink-4">{label}</dt>
+      <dd className="mt-0.5 text-ink-2">{value}</dd>
+    </div>
+  )
 }
 
-export default function ReviewQueueTable({ rows, orderBasePath = '/admin/orders' }: { rows: SampleTest[]; orderBasePath?: string }) {
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
-
-  function toggle(key: string) {
-    setCollapsed(prev => {
-      const next = new Set(prev)
-      next.has(key) ? next.delete(key) : next.add(key)
-      return next
-    })
-  }
-
-  const groups: Group[] = []
-  const seen = new Map<string, Group>()
-  for (const row of rows) {
-    const key = row.samples?.id ?? 'unknown'
-    if (!seen.has(key)) {
-      const g: Group = { sampleKey: key, sample: row.samples, tests: [] }
-      seen.set(key, g)
-      groups.push(g)
-    }
-    seen.get(key)!.tests.push(row)
-  }
-
-  if (groups.length === 0) {
+export default function ReviewQueueTable({
+  rows, orderBasePath = '/admin/orders',
+}: {
+  rows: SampleTest[]
+  orderBasePath?: string
+}) {
+  if (rows.length === 0) {
     return (
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-16 text-center">
-        <ClipboardCheck className="w-10 h-10 text-slate-200 mx-auto mb-3" />
-        <p className="text-slate-400 text-sm">No results awaiting review</p>
-      </div>
+      <TableWrap>
+        <EmptyState
+          icon={ClipboardCheck}
+          title="No results awaiting review"
+          description="When an analyst assigns a result to a reviewer it appears here."
+        />
+      </TableWrap>
     )
   }
 
   return (
     <>
       <Toaster position="top-center" />
-      <div className="space-y-4">
-        {groups.map(({ sampleKey, sample, tests }) => {
-          const isCollapsed = collapsed.has(sampleKey)
-          const order = sample?.orders ?? null
-          const inReviewCount = tests.filter(t => t.status === 'reviewed').length
-          const approvedCount = tests.filter(t => t.status === 'approved').length
-          const overdue = isOverdue(order?.date_due) && inReviewCount > 0
-
-          return (
-            <div key={sampleKey} className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-              <button type="button" onClick={() => toggle(sampleKey)}
-                className="w-full px-6 py-4 flex items-center gap-3 hover:bg-slate-50 transition text-left">
-                {isCollapsed
-                  ? <ChevronRight className="w-4 h-4 text-slate-400 flex-shrink-0" />
-                  : <ChevronDown className="w-4 h-4 text-slate-400 flex-shrink-0" />
-                }
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-3 flex-wrap">
-                    {order?.order_number && (
-                      <span className="text-xs font-mono bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">{order.order_number}</span>
-                    )}
-                    <span className="font-semibold text-slate-900 font-mono">{sample?.sample_id}</span>
-                    {sample?.description && <span className="text-slate-500 text-sm truncate">{sample.description}</span>}
-                    {sample?.matrix_type && (
-                      <span className="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">{sample.matrix_type}</span>
-                    )}
-                    {order?.priority && order.priority !== 'normal' && (
-                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${PRIORITY_BADGE[order.priority] ?? ''}`}>
-                        {PRIORITY_LABEL[order.priority]}
-                      </span>
-                    )}
-                    {overdue && (
-                      <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-red-100 text-red-700 flex items-center gap-1">
-                        <AlertTriangle className="w-3 h-3" /> Overdue
-                      </span>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-4 mt-1 text-xs text-slate-400">
-                    {order?.clients?.client_name && <span>{order.clients.client_name}</span>}
-                    {order?.date_due && (
-                      <span className={overdue ? 'text-red-500 font-medium' : ''}>
-                        Due: {new Date(order.date_due).toLocaleDateString()}
-                      </span>
-                    )}
-                    {order?.id && (
-                      <a href={`${orderBasePath}/${order.id}`} onClick={e => e.stopPropagation()}
-                        className="text-blue-500 hover:underline">View order</a>
-                    )}
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  {inReviewCount > 0 && (
-                    <span className="text-xs bg-blue-50 text-blue-700 border border-blue-200 px-2 py-0.5 rounded-full">
-                      {inReviewCount} to review
-                    </span>
-                  )}
-                  {approvedCount > 0 && (
-                    <span className="text-xs bg-green-50 text-green-700 border border-green-200 px-2 py-0.5 rounded-full">
-                      {approvedCount} approved
-                    </span>
-                  )}
-                  <span className="text-xs text-slate-400">{tests.length} tests</span>
-                </div>
-              </button>
-
-              {!isCollapsed && (
-                <div className="border-t border-slate-100 overflow-x-auto">
-                  <table className="w-full">
-                    <thead>
-                      <tr className="border-b border-slate-100 bg-slate-50">
-                        <th className="text-left px-4 py-2 text-xs font-semibold text-slate-500 uppercase tracking-wide">Test</th>
-                        <th className="text-left px-3 py-2 text-xs font-semibold text-slate-500 uppercase tracking-wide">Result</th>
-                        <th className="text-left px-3 py-2 text-xs font-semibold text-slate-500 uppercase tracking-wide">Analyst notes</th>
-                        <th className="text-left px-3 py-2 text-xs font-semibold text-slate-500 uppercase tracking-wide">Analyst</th>
-                        <th className="text-left px-3 py-2 text-xs font-semibold text-slate-500 uppercase tracking-wide">Reviewer</th>
-                        <th className="text-left px-3 py-2 text-xs font-semibold text-slate-500 uppercase tracking-wide">Status</th>
-                        <th className="text-left px-3 py-2 text-xs font-semibold text-slate-500 uppercase tracking-wide">Waiting</th>
-                        <th className="px-3 py-2" />
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {tests.map(st => <ReviewRow key={st.id} st={st} />)}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-          )
-        })}
-      </div>
+      <TableWrap maxHeight="calc(100vh - 250px)">
+        <Table>
+          <thead>
+            <tr>
+              <Th width="140px">Order</Th>
+              <Th width="110px">Sample</Th>
+              <Th>Test</Th>
+              <Th width="130px">Result</Th>
+              <Th width="120px">Analyst</Th>
+              <Th width="130px">Reviewer</Th>
+              <Th width="90px">Priority</Th>
+              <Th width="90px">Submitted</Th>
+              <Th width="90px">Waiting</Th>
+              <Th width="130px">Status</Th>
+              <Th width="210px">Action</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(st => <ReviewRow key={st.id} st={st} orderBasePath={orderBasePath} />)}
+          </tbody>
+        </Table>
+      </TableWrap>
     </>
   )
 }
