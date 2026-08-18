@@ -1,7 +1,7 @@
 import Link from 'next/link'
 import {
   AlertTriangle, ClipboardList, Clock3, FileCheck2, FlaskConical,
-  GitPullRequestArrow, Send, ShieldCheck, Undo2, UserX,
+  GitPullRequestArrow, Send, ShieldCheck, TestTube, Undo2, UserX,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 import { workflowState, isOverdue } from '@/lib/workflow'
@@ -45,7 +45,8 @@ export default async function AdminDashboard({ searchParams }: Props) {
   const { data: { user } } = await supabase.auth.getUser()
   const period = resolvePeriod(sp)
 
-  const [profileRes, unreadRes, ordersRes, samplesRes, resultsRes, auditRes, amendmentsRes] = await Promise.all([
+  const [profileRes, unreadRes, ordersRes, samplesRes, resultsRes, auditRes, amendmentsRes,
+         catalogRes, catalogActiveRes] = await Promise.all([
     supabase.from('profiles').select('first_name, last_name, email').eq('id', user!.id).single(),
     supabase.from('notifications').select('*', { count: 'exact', head: true })
       .eq('user_id', user!.id).eq('is_read', false),
@@ -68,6 +69,10 @@ export default async function AdminDashboard({ searchParams }: Props) {
       .order('created_at', { ascending: false })
       .limit(120),
     supabase.from('amendments').select('id, status'),
+    // Catalog size is a standing figure, not a period metric — it is the
+    // same count the Test Catalog page shows, read head-only.
+    supabase.from('tests').select('*', { count: 'exact', head: true }),
+    supabase.from('tests').select('*', { count: 'exact', head: true }).eq('is_active', true),
   ])
 
   const profile = profileRes.data as any
@@ -76,6 +81,8 @@ export default async function AdminDashboard({ searchParams }: Props) {
   const results = (resultsRes.data ?? []) as any[]
   const audit = (auditRes.data ?? []) as unknown as AuditRow[]
   const amendments = (amendmentsRes.data ?? []) as any[]
+  const catalogTests = catalogRes.count ?? 0
+  const catalogActive = catalogActiveRes.count ?? 0
 
   const displayName = profile?.first_name || profile?.email?.split('@')[0] || 'there'
 
@@ -92,10 +99,8 @@ export default async function AdminDashboard({ searchParams }: Props) {
 
   // Turnaround only exists once an order has actually reached the client —
   // released_at is the only stored fact that stops the clock.
-  const releasedNow  = orders.filter(o => inNow(o.released_at) && o.date_received)
-  const releasedPrev = orders.filter(o => inPrev(o.released_at) && o.date_received)
-  const tatNow  = meanHours(releasedNow.map(o => ({ start: o.date_received, end: o.released_at })))
-  const tatPrev = meanHours(releasedPrev.map(o => ({ start: o.date_received, end: o.released_at })))
+  const releasedNow = orders.filter(o => inNow(o.released_at) && o.date_received)
+  const tatNow = meanHours(releasedNow.map(o => ({ start: o.date_received, end: o.released_at })))
 
   // ── Result workflow rollup (live) ──────────────────────────
   const stateOf = (r: any) => workflowState({
@@ -191,9 +196,10 @@ export default async function AdminDashboard({ searchParams }: Props) {
       unavailable: resultTat === null ? 'No results approved in this period.' : undefined,
     },
     {
-      label: 'Tests completed',
-      value: String(approvedNow.length),
-      basis: `Sample tests whose approved_at falls ${period.phrase}.`,
+      label: 'Average TAT',
+      value: formatHours(tatNow),
+      basis: `Mean time from sample receipt to the report being released to the client, across the ${releasedNow.length} order(s) released ${period.phrase}.`,
+      unavailable: tatNow === null ? 'No orders released in this period.' : undefined,
     },
     {
       label: 'First-pass approval',
@@ -377,14 +383,11 @@ export default async function AdminDashboard({ searchParams }: Props) {
           href="/admin/orders"
         />
         <KPICard
-          label="Average TAT" value={formatHours(tatNow)} icon={Clock3} accent="warn"
-          hint="Sample received → report released"
-          note={tatNow === null
-            ? 'No orders released in this period'
-            : `Across ${releasedNow.length} released order${releasedNow.length === 1 ? '' : 's'}`}
-          trend={tatNow !== null && tatPrev !== null ? trend(tatNow, tatPrev) : null}
-          goodWhen="down"
-          href="/admin/orders?status=completed"
+          label="Tests" value={catalogTests} icon={TestTube} accent="info"
+          hint={catalogActive === catalogTests
+            ? `${catalogActive} active in the catalog`
+            : `${catalogActive} active · ${catalogTests - catalogActive} inactive`}
+          href="/admin/tests"
         />
         <KPICard
           label="Results approved" value={approvedNow.length} icon={FileCheck2} accent="ok"
