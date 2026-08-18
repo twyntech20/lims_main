@@ -1,7 +1,9 @@
 import { createClient } from '@/lib/supabase/server'
-import Link from 'next/link'
-import { Plus } from 'lucide-react'
+import { Plus, Users } from 'lucide-react'
 import UserCard from '@/components/users/UserCard'
+import {
+  Page, PageHeader, Tabs, FilterBar, SearchField, ButtonLink, EmptyState, Panel,
+} from '@/components/ui/primitives'
 
 const ROLE_TABS = ['all', 'admin', 'manager', 'analyst', 'client'] as const
 type RoleTab = typeof ROLE_TABS[number]
@@ -9,11 +11,8 @@ type RoleTab = typeof ROLE_TABS[number]
 interface SearchParams { role?: RoleTab; search?: string }
 interface Props { searchParams: Promise<SearchParams> }
 
-const ROLE_COLORS: Record<string, string> = {
-  admin: 'bg-red-100 text-red-700',
-  manager: 'bg-purple-100 text-purple-700',
-  analyst: 'bg-blue-100 text-blue-700',
-  client: 'bg-green-100 text-green-700',
+const ROLE_LABEL: Record<string, string> = {
+  all: 'All', admin: 'Admin', manager: 'Manager', analyst: 'Analyst', client: 'Client',
 }
 
 export default async function AdminUsersPage({ searchParams }: Props) {
@@ -38,75 +37,98 @@ export default async function AdminUsersPage({ searchParams }: Props) {
   const { data: profiles } = await query
 
   // Counts per role for tab badges
-  const { data: allProfiles } = await supabase.from('profiles').select('role')
+  const { data: allProfiles } = await supabase.from('profiles').select('role, is_active')
   const counts: Record<string, number> = { all: allProfiles?.length ?? 0 }
   for (const p of allProfiles ?? []) {
     counts[p.role] = (counts[p.role] ?? 0) + 1
   }
+  const inactive = (allProfiles ?? []).filter(p => !p.is_active).length
+
+  const rows = profiles ?? []
+
+  const tabHref = (tab: RoleTab) => {
+    const p = new URLSearchParams()
+    if (tab !== 'all') p.set('role', tab)
+    if (search) p.set('search', search)
+    const qs = p.toString()
+    return `/admin/users${qs ? `?${qs}` : ''}`
+  }
 
   return (
-    <div className="p-6">
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-900">Users</h1>
-          <p className="text-slate-500 text-sm mt-0.5">{profiles?.length ?? 0} shown</p>
-        </div>
-        {isAdmin && (
-          <Link
-            href="/admin/users/new"
-            className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white font-medium px-4 py-2 rounded-xl text-sm transition shadow-sm"
-          >
-            <Plus className="w-4 h-4" /> New User
-          </Link>
+    <Page>
+      <PageHeader
+        title="Users"
+        description="Laboratory staff and client portal accounts"
+        meta={
+          <>
+            {counts.all} account{counts.all === 1 ? '' : 's'}
+            {inactive > 0 && <> · <span className="text-ink-4">{inactive} inactive</span></>}
+          </>
+        }
+        actions={isAdmin && (
+          <ButtonLink href="/admin/users/new" variant="primary">
+            <Plus className="h-3.5 w-3.5" /> New user
+          </ButtonLink>
         )}
-      </div>
+      />
 
-      {/* Role tabs */}
-      <div className="flex gap-1 mb-5 bg-slate-100 p-1 rounded-xl w-fit">
-        {ROLE_TABS.map(tab => (
-          <Link
-            key={tab}
-            href={`/admin/users?role=${tab}`}
-            className={`px-4 py-1.5 rounded-lg text-sm font-medium transition capitalize ${
-              role === tab ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500 hover:text-slate-700'
-            }`}
-          >
-            {tab === 'all' ? 'All' : tab}
-            <span className={`ml-1.5 text-xs ${role === tab ? 'text-slate-600' : 'text-slate-400'}`}>
-              {counts[tab] ?? 0}
-            </span>
-          </Link>
-        ))}
-      </div>
-
-      {/* Search */}
-      <form className="relative mb-5">
-        <input
-          name="search"
-          defaultValue={search}
-          placeholder="Search by name, email, or company…"
-          className="w-full pl-4 pr-4 py-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+      <div className="mb-3">
+        <Tabs
+          items={ROLE_TABS.map(tab => ({
+            key: tab,
+            label: ROLE_LABEL[tab],
+            href: tabHref(tab),
+            count: counts[tab] ?? 0,
+            active: role === tab,
+          }))}
         />
-        {role !== 'all' && <input type="hidden" name="role" value={role} />}
-      </form>
-
-      {/* Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {(profiles ?? []).map((profile: any) => (
-          <UserCard
-            key={profile.id}
-            profile={profile}
-            isAdmin={isAdmin}
-            isSelf={profile.id === me!.id}
-            roleColors={ROLE_COLORS}
-          />
-        ))}
-        {(profiles ?? []).length === 0 && (
-          <div className="col-span-3 bg-white rounded-2xl border border-slate-200 shadow-sm p-12 text-center text-slate-400">
-            No users found
-          </div>
-        )}
       </div>
-    </div>
+
+      <FilterBar
+        hidden={{ role: role !== 'all' ? role : undefined }}
+        clearHref={role === 'all' ? '/admin/users' : `/admin/users?role=${role}`}
+        active={!!search}
+        count={rows.length}
+      >
+        <SearchField name="search" defaultValue={search} placeholder="Search name, email or company…" />
+      </FilterBar>
+
+      {rows.length === 0 ? (
+        <Panel>
+          {search ? (
+            <EmptyState
+              icon={Users}
+              title="No results found"
+              description="Try adjusting your search or switching role tabs."
+              action={<ButtonLink href={tabHref(role)} variant="secondary">Clear search</ButtonLink>}
+              compact
+            />
+          ) : (
+            <EmptyState
+              icon={Users}
+              title={role === 'all' ? 'No users yet' : `No ${ROLE_LABEL[role].toLowerCase()} accounts`}
+              description={role === 'all'
+                ? 'Create the first account to give someone access.'
+                : 'Nobody currently holds this role.'}
+              action={isAdmin
+                ? <ButtonLink href="/admin/users/new" variant="primary"><Plus className="h-3.5 w-3.5" /> New user</ButtonLink>
+                : undefined}
+              compact={role !== 'all'}
+            />
+          )}
+        </Panel>
+      ) : (
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          {rows.map((profile: any) => (
+            <UserCard
+              key={profile.id}
+              profile={profile}
+              isAdmin={isAdmin}
+              isSelf={profile.id === me!.id}
+            />
+          ))}
+        </div>
+      )}
+    </Page>
   )
 }

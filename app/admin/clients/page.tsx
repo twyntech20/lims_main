@@ -1,16 +1,12 @@
 import { createClient } from '@/lib/supabase/server'
 import Link from 'next/link'
-import { Plus, Download, Upload, Search, Tag, MapPin, Phone } from 'lucide-react'
+import { Plus, Briefcase, MapPin, Phone, Mail, ArrowRight } from 'lucide-react'
 import ClientsTableActions from '@/components/clients/ClientsTableActions'
-
-const TAG_COLORS: Record<string, string> = {
-  soil: 'bg-amber-100 text-amber-700',
-  food: 'bg-orange-100 text-orange-700',
-  water: 'bg-blue-100 text-blue-700',
-  chemistry: 'bg-purple-100 text-purple-700',
-  microbiology: 'bg-green-100 text-green-700',
-  legionella: 'bg-red-100 text-red-700',
-}
+import { formatDate } from '@/lib/utils'
+import {
+  Page, PageHeader, FilterBar, SearchField, ButtonLink, Badge, Mono, Stacked,
+  Table, Th, Td, Tr, TableWrap, EmptyState, CardGrid, CARD_VIEW_MAX,
+} from '@/components/ui/primitives'
 
 interface SearchParams { search?: string }
 interface Props { searchParams: Promise<SearchParams> }
@@ -33,113 +29,175 @@ export default async function AdminClientsPage({ searchParams }: Props) {
 
   const { data: clients } = await query
 
+  const rows = clients ?? []
+  const tagsOf = (c: { tags: string | null }) =>
+    c.tags ? (c.tags as string).split(',').map(t => t.trim()).filter(Boolean) : []
+
+  const location = (c: { city: string | null; state: string | null }) =>
+    [c.city, c.state].filter(Boolean).join(', ')
+
   return (
-    <div className="p-6">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-900">Clients</h1>
-          <p className="text-slate-500 text-sm mt-0.5">{clients?.length ?? 0} total</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <ClientsTableActions />
-          <Link
-            href="/admin/clients/new"
-            className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white font-medium px-4 py-2 rounded-xl text-sm transition shadow-sm"
-          >
-            <Plus className="w-4 h-4" /> New Client
-          </Link>
-        </div>
-      </div>
+    <Page>
+      <PageHeader
+        title="Clients"
+        description="Organisations that submit samples to the laboratory"
+        meta={<>{rows.length} client{rows.length === 1 ? '' : 's'}</>}
+        secondary={<ClientsTableActions />}
+        actions={
+          <ButtonLink href="/admin/clients/new" variant="primary">
+            <Plus className="h-3.5 w-3.5" /> New client
+          </ButtonLink>
+        }
+      />
 
-      {/* Search */}
-      <div className="relative mb-5">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-        <form>
-          <input
-            name="search"
-            defaultValue={search}
-            placeholder="Search by ID, name, city, state, address, or tags…"
-            className="w-full pl-10 pr-4 py-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-          />
-        </form>
-      </div>
+      <FilterBar clearHref="/admin/clients" active={!!search} count={rows.length} unit="shown">
+        <SearchField
+          name="search"
+          defaultValue={search}
+          placeholder="Search ID, name, city, state, address or tags…"
+        />
+      </FilterBar>
 
-      {/* Table */}
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-slate-100 bg-slate-50">
-              <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Client ID</th>
-              <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Name</th>
-              <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Location</th>
-              <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Contact</th>
-              <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Tags</th>
-              <th className="px-5 py-3" />
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-50">
-            {(clients ?? []).map(client => {
-              const tags: string[] = client.tags ? (client.tags as string).split(',').filter(Boolean) : []
-              return (
-                <tr key={client.id} className="hover:bg-slate-50 transition-colors group">
-                  <td className="px-5 py-3.5">
-                    <span className="font-mono text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded">
-                      {client.client_id ?? '—'}
-                    </span>
-                  </td>
-                  <td className="px-5 py-3.5">
-                    <Link href={`/admin/clients/${client.id}`} className="font-medium text-slate-900 hover:text-blue-600 transition">
-                      {client.client_name}
-                    </Link>
-                    {client.email && <p className="text-xs text-slate-400 mt-0.5">{client.email}</p>}
-                  </td>
-                  <td className="px-5 py-3.5">
-                    {(client.city || client.state) ? (
-                      <div className="flex items-center gap-1 text-slate-600">
-                        <MapPin className="w-3.5 h-3.5 text-slate-400" />
-                        <span>{[client.city, client.state].filter(Boolean).join(', ')}</span>
-                      </div>
-                    ) : <span className="text-slate-300">—</span>}
-                  </td>
-                  <td className="px-5 py-3.5">
-                    {client.phone ? (
-                      <div className="flex items-center gap-1 text-slate-600">
-                        <Phone className="w-3.5 h-3.5 text-slate-400" />
-                        <span>{client.phone}</span>
-                      </div>
-                    ) : <span className="text-slate-300">—</span>}
-                  </td>
-                  <td className="px-5 py-3.5">
-                    <div className="flex flex-wrap gap-1">
-                      {tags.map(tag => (
-                        <span key={tag} className={`text-xs px-2 py-0.5 rounded-full font-medium ${TAG_COLORS[tag] ?? 'bg-slate-100 text-slate-600'}`}>
-                          {tag}
-                        </span>
-                      ))}
-                    </div>
-                  </td>
-                  <td className="px-5 py-3.5 text-right">
+      {rows.length === 0 ? (
+        <TableWrap>
+          {search ? (
+            <EmptyState
+              icon={Briefcase}
+              title="No results found"
+              description="Try adjusting your search."
+              action={<ButtonLink href="/admin/clients" variant="secondary">Clear search</ButtonLink>}
+              compact
+            />
+          ) : (
+            <EmptyState
+              icon={Briefcase}
+              title="No clients yet"
+              description="Add your first client so orders can be logged against them."
+              action={<ButtonLink href="/admin/clients/new" variant="primary"><Plus className="h-3.5 w-3.5" /> New client</ButtonLink>}
+            />
+          )}
+        </TableWrap>
+      ) : rows.length <= CARD_VIEW_MAX ? (
+        /* Few enough records that a table would look stranded. */
+        <CardGrid>
+          {rows.map(client => {
+            const tags = tagsOf(client)
+            return (
+              <div
+                key={client.id}
+                className="flex flex-col rounded-lg border border-line bg-surface shadow-xs transition-all hover:-translate-y-px hover:border-line-strong hover:shadow-sm"
+              >
+                <div className="flex items-start justify-between gap-2 border-b border-line px-4 py-3">
+                  <div className="min-w-0">
                     <Link
                       href={`/admin/clients/${client.id}`}
-                      className="text-xs text-slate-400 group-hover:text-blue-600 font-medium transition"
+                      className="block truncate text-[14px] font-semibold text-ink hover:text-brand-600"
                     >
-                      View →
+                      {client.client_name}
                     </Link>
-                  </td>
-                </tr>
-              )
-            })}
-            {(clients ?? []).length === 0 && (
+                    {client.client_id && <Mono className="text-ink-4">{client.client_id}</Mono>}
+                  </div>
+                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-brand-50 text-[11px] font-semibold text-brand-700">
+                    {client.client_name?.slice(0, 2).toUpperCase() ?? '—'}
+                  </span>
+                </div>
+
+                <div className="space-y-1.5 px-4 py-3 text-[12.5px]">
+                  <p className="flex items-center gap-1.5 text-ink-2">
+                    <MapPin className="h-3.5 w-3.5 shrink-0 text-ink-4" />
+                    {location(client) || <span className="text-ink-4">No location on file</span>}
+                  </p>
+                  <p className="flex items-center gap-1.5 text-ink-2">
+                    <Phone className="h-3.5 w-3.5 shrink-0 text-ink-4" />
+                    {client.phone || <span className="text-ink-4">No phone on file</span>}
+                  </p>
+                  <p className="flex items-center gap-1.5 truncate text-ink-2">
+                    <Mail className="h-3.5 w-3.5 shrink-0 text-ink-4" />
+                    <span className="truncate">{client.email || <span className="text-ink-4">No email on file</span>}</span>
+                  </p>
+                  {tags.length > 0 && (
+                    <div className="flex flex-wrap gap-1 pt-1">
+                      {tags.map(tag => <Badge key={tag} tone="brand">{tag}</Badge>)}
+                    </div>
+                  )}
+                </div>
+
+                <div className="mt-auto flex items-center justify-between border-t border-line px-4 py-2">
+                  <span className="text-[11.5px] text-ink-4">Added {formatDate(client.created_at)}</span>
+                  <Link
+                    href={`/admin/clients/${client.id}`}
+                    className="inline-flex items-center gap-1 text-[12px] font-medium text-brand-600 hover:text-brand-700"
+                  >
+                    Open <ArrowRight className="h-3 w-3" />
+                  </Link>
+                </div>
+              </div>
+            )
+          })}
+        </CardGrid>
+      ) : (
+        <TableWrap maxHeight="calc(100vh - 260px)">
+          <Table>
+            <thead>
               <tr>
-                <td colSpan={6} className="px-5 py-12 text-center text-slate-400">
-                  {search ? 'No clients match your search' : 'No clients yet. Add your first client.'}
-                </td>
+                <Th width="110px">Client ID</Th>
+                <Th>Client</Th>
+                <Th width="180px">Location</Th>
+                <Th width="160px">Contact</Th>
+                <Th width="200px">Tags</Th>
+                <Th width="110px">Added</Th>
+                <Th width="70px" align="right" />
               </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-    </div>
+            </thead>
+            <tbody>
+              {rows.map(client => {
+                const tags = tagsOf(client)
+                return (
+                  <Tr key={client.id}>
+                    <Td className="whitespace-nowrap">
+                      {client.client_id
+                        ? <Mono className="text-ink-2">{client.client_id}</Mono>
+                        : <span className="text-ink-4">—</span>}
+                    </Td>
+                    <Td>
+                      <Stacked
+                        primary={
+                          <Link href={`/admin/clients/${client.id}`} className="font-medium hover:text-brand-600">
+                            {client.client_name}
+                          </Link>
+                        }
+                        secondary={client.email ?? undefined}
+                      />
+                    </Td>
+                    <Td className="text-[12.5px] text-ink-2">
+                      {location(client) || <span className="text-ink-4">—</span>}
+                    </Td>
+                    <Td className="whitespace-nowrap text-[12.5px] text-ink-2">
+                      {client.phone || <span className="text-ink-4">—</span>}
+                    </Td>
+                    <Td>
+                      {tags.length > 0
+                        ? <div className="flex flex-wrap gap-1">{tags.map(t => <Badge key={t} tone="brand">{t}</Badge>)}</div>
+                        : <span className="text-ink-4">—</span>}
+                    </Td>
+                    <Td className="whitespace-nowrap tabular text-[12.5px] text-ink-3">
+                      {formatDate(client.created_at)}
+                    </Td>
+                    <Td align="right">
+                      <Link
+                        href={`/admin/clients/${client.id}`}
+                        className="inline-flex items-center gap-1 text-[12px] font-medium text-brand-600 hover:text-brand-700"
+                      >
+                        Open <ArrowRight className="h-3 w-3" />
+                      </Link>
+                    </Td>
+                  </Tr>
+                )
+              })}
+            </tbody>
+          </Table>
+        </TableWrap>
+      )}
+    </Page>
   )
 }

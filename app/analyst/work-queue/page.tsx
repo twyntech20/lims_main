@@ -1,10 +1,9 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
-import { Filter } from 'lucide-react'
 import WorkQueueTable from '@/components/work-queue/WorkQueueTable'
 import { RESULT_QUEUE_SELECT, REVIEWER_SELECT } from '@/lib/queries/result-queue'
 import { workflowState, isOverdue, type WorkflowState } from '@/lib/workflow'
-import { Page, PageHeader, Tabs, Toolbar, Select, SearchField, buttonClass } from '@/components/ui/primitives'
+import { Page, PageHeader, Tabs, FilterBar, Select, SearchField } from '@/components/ui/primitives'
 
 interface SearchParams { status?: string; category?: string; priority?: string; due?: string; q?: string }
 interface Props { searchParams: Promise<SearchParams> }
@@ -96,6 +95,7 @@ export default async function AnalystWorkQueuePage({ searchParams }: Props) {
     <Page wide>
       <PageHeader
         title="My Work Queue"
+        description="Laboratory work assigned to you"
         meta={
           actionable === 0
             ? 'You have nothing waiting. Approved work stays listed for reference.'
@@ -105,32 +105,30 @@ export default async function AnalystWorkQueuePage({ searchParams }: Props) {
 
       <div className="mb-3"><Tabs items={tabs} /></div>
 
-      <form>
-        {status && <input type="hidden" name="status" value={status} />}
-        <Toolbar>
-          <SearchField defaultValue={q} placeholder="Search order, sample or test…" />
-          <Select name="category" defaultValue={category ?? ''} aria-label="Category">
-            <option value="">All categories</option>
-            <option value="chemistry">Chemistry</option>
-            <option value="microbiology">Microbiology</option>
-          </Select>
-          <Select name="priority" defaultValue={priority ?? ''} aria-label="Priority">
-            <option value="">All priorities</option>
-            <option value="same_day">STAT (same day)</option>
-            <option value="priority_24h">24 hour</option>
-            <option value="priority_48h">48 hour</option>
-            <option value="normal">Normal</option>
-          </Select>
-          <Select name="due" defaultValue={due ?? ''} aria-label="Due date">
-            <option value="">Any due date</option>
-            <option value="overdue">Overdue</option>
-          </Select>
-          <button type="submit" className={buttonClass('secondary', 'sm')}>
-            <Filter className="h-3 w-3" /> Apply
-          </button>
-          <span className="ml-auto text-[12px] text-ink-3 tabular">{rows.length} shown</span>
-        </Toolbar>
-      </form>
+      <FilterBar
+        hidden={{ status }}
+        clearHref={`/analyst/work-queue${status ? `?status=${status}` : ''}`}
+        active={!!(category || priority || due || q)}
+        count={rows.length}
+      >
+        <SearchField defaultValue={q} placeholder="Search order, sample or test…" />
+        <Select name="category" defaultValue={category ?? ''} aria-label="Category">
+          <option value="">All categories</option>
+          <option value="chemistry">Chemistry</option>
+          <option value="microbiology">Microbiology</option>
+        </Select>
+        <Select name="priority" defaultValue={priority ?? ''} aria-label="Priority">
+          <option value="">All priorities</option>
+          <option value="same_day">STAT (same day)</option>
+          <option value="priority_24h">24 hour</option>
+          <option value="priority_48h">48 hour</option>
+          <option value="normal">Normal</option>
+        </Select>
+        <Select name="due" defaultValue={due ?? ''} aria-label="Due date">
+          <option value="">Any due date</option>
+          <option value="overdue">Overdue</option>
+        </Select>
+      </FilterBar>
 
       <WorkQueueTable rows={rows as any} orderBasePath="/analyst/orders" reviewers={reviewerProfiles ?? []} />
     </Page>

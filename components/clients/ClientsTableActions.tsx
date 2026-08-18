@@ -4,6 +4,7 @@ import { useRef, useState, useTransition } from 'react'
 import { Download, Upload, Loader2 } from 'lucide-react'
 import { importClientsCSV } from '@/app/actions/clients'
 import toast, { Toaster } from 'react-hot-toast'
+import { buttonClass } from '@/components/ui/primitives'
 
 export default function ClientsTableActions() {
   const fileRef = useRef<HTMLInputElement>(null)
@@ -33,18 +34,15 @@ export default function ClientsTableActions() {
   return (
     <>
       <Toaster position="top-center" />
-      <button
-        onClick={handleExport}
-        className="flex items-center gap-1.5 border border-slate-200 text-slate-600 hover:text-slate-900 font-medium px-3 py-2 rounded-xl text-sm transition"
-      >
-        <Download className="w-4 h-4" /> Export
+      <button onClick={handleExport} className={buttonClass('secondary')}>
+        <Download className="h-3.5 w-3.5" /> Export
       </button>
       <button
         onClick={() => fileRef.current?.click()}
         disabled={importing}
-        className="flex items-center gap-1.5 border border-slate-200 text-slate-600 hover:text-slate-900 font-medium px-3 py-2 rounded-xl text-sm transition disabled:opacity-50"
+        className={buttonClass('secondary')}
       >
-        {importing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+        {importing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
         Import
       </button>
       <input ref={fileRef} type="file" accept=".csv,.xlsx" className="hidden" onChange={handleFileChange} />

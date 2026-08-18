@@ -1,6 +1,8 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import ProfileForm from '@/components/profile/ProfileForm'
+import { Page, PageHeader } from '@/components/ui/primitives'
+import { UserCircle } from 'lucide-react'
 
 export default async function AdminProfilePage() {
   const supabase = await createClient()
@@ -16,9 +18,14 @@ export default async function AdminProfilePage() {
   if (!profile) redirect('/login')
 
   return (
-    <div className="p-6 max-w-2xl mx-auto">
-      <h1 className="text-2xl font-bold text-slate-900 mb-6">My Profile</h1>
+    <Page narrow>
+      <PageHeader
+        icon={UserCircle}
+        title="My Profile"
+        description="Your account details and contact information"
+        meta={<span className="capitalize">{profile.role}</span>}
+      />
       <ProfileForm profile={profile as any} />
-    </div>
+    </Page>
   )
 }

@@ -1,10 +1,9 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
-import { Filter } from 'lucide-react'
 import ReviewQueueTable from '@/components/work-queue/ReviewQueueTable'
 import { RESULT_QUEUE_SELECT } from '@/lib/queries/result-queue'
 import { isOverdue } from '@/lib/workflow'
-import { Page, PageHeader, Toolbar, Select, SearchField, buttonClass } from '@/components/ui/primitives'
+import { Page, PageHeader, FilterBar, Select, SearchField } from '@/components/ui/primitives'
 
 interface SearchParams { category?: string; priority?: string; due?: string; q?: string }
 interface Props { searchParams: Promise<SearchParams> }
@@ -51,6 +50,7 @@ export default async function AnalystReviewQueuePage({ searchParams }: Props) {
     <Page wide>
       <PageHeader
         title="Review Queue"
+        description="Results assigned to you for a review decision"
         meta={
           <>
             {rows.length} result{rows.length === 1 ? '' : 's'} awaiting your review
@@ -59,31 +59,29 @@ export default async function AnalystReviewQueuePage({ searchParams }: Props) {
         }
       />
 
-      <form>
-        <Toolbar>
-          <SearchField defaultValue={q} placeholder="Search order, sample or test…" />
-          <Select name="category" defaultValue={category ?? ''} aria-label="Category">
-            <option value="">All categories</option>
-            <option value="chemistry">Chemistry</option>
-            <option value="microbiology">Microbiology</option>
-          </Select>
-          <Select name="priority" defaultValue={priority ?? ''} aria-label="Priority">
-            <option value="">All priorities</option>
-            <option value="same_day">STAT (same day)</option>
-            <option value="priority_24h">24 hour</option>
-            <option value="priority_48h">48 hour</option>
-            <option value="normal">Normal</option>
-          </Select>
-          <Select name="due" defaultValue={due ?? ''} aria-label="Due date">
-            <option value="">Any due date</option>
-            <option value="overdue">Overdue</option>
-          </Select>
-          <button type="submit" className={buttonClass('secondary', 'sm')}>
-            <Filter className="h-3 w-3" /> Apply
-          </button>
-          <span className="ml-auto text-[12px] text-ink-3 tabular">{rows.length} shown</span>
-        </Toolbar>
-      </form>
+      <FilterBar
+        clearHref="/analyst/review-queue"
+        active={!!(category || priority || due || q)}
+        count={rows.length}
+      >
+        <SearchField defaultValue={q} placeholder="Search order, sample or test…" />
+        <Select name="category" defaultValue={category ?? ''} aria-label="Category">
+          <option value="">All categories</option>
+          <option value="chemistry">Chemistry</option>
+          <option value="microbiology">Microbiology</option>
+        </Select>
+        <Select name="priority" defaultValue={priority ?? ''} aria-label="Priority">
+          <option value="">All priorities</option>
+          <option value="same_day">STAT (same day)</option>
+          <option value="priority_24h">24 hour</option>
+          <option value="priority_48h">48 hour</option>
+          <option value="normal">Normal</option>
+        </Select>
+        <Select name="due" defaultValue={due ?? ''} aria-label="Due date">
+          <option value="">Any due date</option>
+          <option value="overdue">Overdue</option>
+        </Select>
+      </FilterBar>
 
       <ReviewQueueTable rows={rows as any} orderBasePath="/analyst/orders" />
     </Page>

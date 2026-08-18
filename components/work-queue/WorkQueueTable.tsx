@@ -4,7 +4,7 @@ import { useState, useTransition } from 'react'
 import Link from 'next/link'
 import { enterResultsBatch, submitSampleForReview } from '@/app/actions/results'
 import {
-  CheckCircle2, Loader2, Undo2, AlertTriangle, Lock, Inbox, X, ChevronRight,
+  CheckCircle2, Loader2, Undo2, AlertTriangle, Lock, Inbox, X, ChevronRight, ArrowRight,
 } from 'lucide-react'
 import toast, { Toaster } from 'react-hot-toast'
 import { cn } from '@/lib/utils'
@@ -256,10 +256,19 @@ function QueueRow({
               {open ? <X className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
               {state === 'returned' ? 'Resolve return' : state === 'awaiting_entry' ? 'Enter result' : 'Assign reviewer'}
             </button>
+          ) : state === 'approved' ? (
+            /* Release happens on the order — make the next step a real
+               link rather than a label the operator has to decode. */
+            <Link
+              href={`${orderBasePath}/${order?.id}`}
+              className={buttonClass('secondary', 'sm', 'border-ok-line bg-ok-bg text-ok-fg hover:bg-ok-line/40')}
+            >
+              <CheckCircle2 className="h-3 w-3" /> Release report
+              <ArrowRight className="h-3 w-3" />
+            </Link>
           ) : (
             <span className="flex items-center gap-1.5 text-[12px] text-ink-3">
               {state === 'in_review' && <><Loader2 className="h-3 w-3" /> {WORKFLOW_NEXT_ACTION[state]}</>}
-              {state === 'approved'  && <><CheckCircle2 className="h-3 w-3 text-ok-fg" /> Release report</>}
               {state === 'released'  && <><Lock className="h-3 w-3" /> Released</>}
             </span>
           )}

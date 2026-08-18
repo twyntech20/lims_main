@@ -1,6 +1,8 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import NotificationList from '@/components/notifications/NotificationList'
+import { Page, PageHeader } from '@/components/ui/primitives'
+import { Bell } from 'lucide-react'
 
 export default async function AdminNotificationsPage() {
   const supabase = await createClient()
@@ -14,9 +16,20 @@ export default async function AdminNotificationsPage() {
     .order('created_at', { ascending: false })
     .limit(100)
 
+  const rows = (notifications ?? []) as any[]
+  const unread = rows.filter(n => !n.is_read).length
+
   return (
-    <div className="p-6 max-w-3xl mx-auto">
-      <NotificationList rows={(notifications ?? []) as any} />
-    </div>
+    <Page narrow>
+      <PageHeader
+        icon={Bell}
+        title="Notifications"
+        description="Workflow events addressed to you"
+        meta={unread > 0
+          ? <><span className="font-medium text-ink-2">{unread} unread</span> of {rows.length}</>
+          : <>{rows.length} notification{rows.length === 1 ? '' : 's'} · all read</>}
+      />
+      <NotificationList rows={rows} />
+    </Page>
   )
 }

@@ -1,13 +1,14 @@
 import { createClient } from '@/lib/supabase/server'
 import Link from 'next/link'
-import { Plus, Filter, ClipboardList, AlertTriangle, ArrowRight } from 'lucide-react'
+import { Plus, ClipboardList, AlertTriangle, ArrowRight } from 'lucide-react'
 import { formatDate, getPriorityLabel } from '@/lib/utils'
 import { personName, waitingTime, isOverdue } from '@/lib/workflow'
 import {
-  Page, PageHeader, Tabs, Toolbar, Select, SearchField, ButtonLink, buttonClass,
-  Badge, Mono, Table, Th, Td, Tr, TableWrap, EmptyState, type Tone,
+  Page, PageHeader, Tabs, FilterBar, Select, SearchField, ButtonLink,
+  Badge, Mono, Table, Th, Td, Tr, TableWrap, EmptyState, CardGrid, CARD_VIEW_MAX, type Tone,
 } from '@/components/ui/primitives'
 import { ProgressCell } from '@/components/ui/metrics'
+import OrderCard from '@/components/orders/OrderCard'
 
 const STATUS: Record<string, { label: string; tone: Tone }> = {
   new:         { label: 'New',         tone: 'neutral' },
@@ -91,6 +92,7 @@ export default async function AdminOrdersPage({ searchParams }: Props) {
     <Page wide>
       <PageHeader
         title="Orders"
+        description="Track laboratory orders from receipt to release"
         meta={
           <>
             {all.length} order{all.length === 1 ? '' : 's'}
@@ -106,48 +108,68 @@ export default async function AdminOrdersPage({ searchParams }: Props) {
 
       <div className="mb-3"><Tabs items={tabs} /></div>
 
-      <form>
-        {params.status && <input type="hidden" name="status" value={params.status} />}
-        <Toolbar>
-          <SearchField defaultValue={params.q} placeholder="Search order number or client…" />
-          <Select name="priority" defaultValue={params.priority ?? ''} aria-label="Priority">
-            <option value="">All priorities</option>
-            <option value="same_day">STAT (same day)</option>
-            <option value="priority_24h">24 hour</option>
-            <option value="priority_48h">48 hour</option>
-            <option value="normal">Normal</option>
-          </Select>
-          <Select name="analyst" defaultValue={params.analyst ?? ''} aria-label="Assigned analyst">
-            <option value="">All analysts</option>
-            {analysts?.map(a => (
-              <option key={a.id} value={a.id}>
-                {[a.first_name, a.last_name].filter(Boolean).join(' ') || a.email}
-              </option>
-            ))}
-          </Select>
-          <button type="submit" className={buttonClass('secondary', 'sm')}>
-            <Filter className="h-3 w-3" /> Apply
-          </button>
-          {hasFilters && (
-            <a href={href(params.status)} className="px-1.5 text-[12px] text-ink-3 underline-offset-2 hover:text-ink hover:underline">
-              Clear
-            </a>
-          )}
-          <span className="ml-auto text-[12px] text-ink-3 tabular">{filtered.length} shown</span>
-        </Toolbar>
-      </form>
+      <FilterBar
+        hidden={{ status: params.status }}
+        clearHref={href(params.status)}
+        active={hasFilters}
+        count={filtered.length}
+      >
+        <SearchField defaultValue={params.q} placeholder="Search order number or client…" />
+        <Select name="priority" defaultValue={params.priority ?? ''} aria-label="Priority">
+          <option value="">All priorities</option>
+          <option value="same_day">STAT (same day)</option>
+          <option value="priority_24h">24 hour</option>
+          <option value="priority_48h">48 hour</option>
+          <option value="normal">Normal</option>
+        </Select>
+        <Select name="analyst" defaultValue={params.analyst ?? ''} aria-label="Assigned analyst">
+          <option value="">All analysts</option>
+          {analysts?.map(a => (
+            <option key={a.id} value={a.id}>
+              {[a.first_name, a.last_name].filter(Boolean).join(' ') || a.email}
+            </option>
+          ))}
+        </Select>
+      </FilterBar>
 
       {filtered.length === 0 ? (
         <TableWrap>
-          <EmptyState
-            icon={ClipboardList}
-            title="No orders match these filters"
-            description="Adjust the filters above, or create the first order."
-            action={<ButtonLink href="/admin/orders/new" variant="primary"><Plus className="h-3.5 w-3.5" /> New order</ButtonLink>}
-          />
+          {all.length === 0 ? (
+            <EmptyState
+              icon={ClipboardList}
+              title="No orders yet"
+              description="Create your first laboratory order to get started."
+              action={<ButtonLink href="/admin/orders/new" variant="primary"><Plus className="h-3.5 w-3.5" /> New order</ButtonLink>}
+            />
+          ) : (
+            <EmptyState
+              icon={ClipboardList}
+              title="No results found"
+              description="Try adjusting your search or filters."
+              action={<ButtonLink href={href(params.status)} variant="secondary">Clear filters</ButtonLink>}
+              compact
+            />
+          )}
         </TableWrap>
+      ) : filtered.length <= CARD_VIEW_MAX ? (
+        /* A handful of records reads better as cards than as a lone
+           table row stranded above an empty screen. */
+        <CardGrid>
+          {filtered.map(order => {
+            const meta = STATUS[order.status] ?? { label: order.status, tone: 'neutral' as Tone }
+            return (
+              <OrderCard
+                key={order.id}
+                order={order}
+                statusLabel={meta.label}
+                statusTone={meta.tone}
+                overdue={isOverdue(order.date_due) && !['completed', 'cancelled'].includes(order.status)}
+              />
+            )
+          })}
+        </CardGrid>
       ) : (
-        <TableWrap maxHeight="calc(100vh - 260px)">
+        <TableWrap maxHeight="calc(100vh - 300px)">
           <Table>
             <thead>
               <tr>

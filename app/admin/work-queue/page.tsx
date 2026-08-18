@@ -1,11 +1,11 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
-import { ClipboardCheck, Filter } from 'lucide-react'
+import { ClipboardCheck } from 'lucide-react'
 import WorkQueueTable from '@/components/work-queue/WorkQueueTable'
 import { RESULT_QUEUE_SELECT, REVIEWER_SELECT } from '@/lib/queries/result-queue'
 import { workflowState, isOverdue, type WorkflowState } from '@/lib/workflow'
 import {
-  Page, PageHeader, Tabs, Toolbar, Select, SearchField, ButtonLink, buttonClass,
+  Page, PageHeader, Tabs, FilterBar, Select, SearchField, ButtonLink,
 } from '@/components/ui/primitives'
 
 interface SearchParams {
@@ -123,6 +123,7 @@ export default async function WorkQueuePage({ searchParams }: Props) {
     <Page wide>
       <PageHeader
         title="Work Queue"
+        description="Laboratory work requiring action"
         meta={
           actionable === 0
             ? 'Nothing is currently waiting on the bench.'
@@ -135,63 +136,54 @@ export default async function WorkQueuePage({ searchParams }: Props) {
         <Tabs items={tabs} />
       </div>
 
-      <form>
-        {status && <input type="hidden" name="status" value={status} />}
-        <Toolbar>
-          <SearchField defaultValue={q} placeholder="Search order, sample, test or client…" />
+      <FilterBar
+        hidden={{ status }}
+        clearHref={`/admin/work-queue${status ? `?status=${status}` : ''}`}
+        active={hasFilters}
+        count={rows.length}
+      >
+        <SearchField defaultValue={q} placeholder="Search order, sample, test or client…" />
 
-          <Select name="priority" defaultValue={priority ?? ''} aria-label="Priority">
-            <option value="">All priorities</option>
-            <option value="same_day">STAT (same day)</option>
-            <option value="priority_24h">24 hour</option>
-            <option value="priority_48h">48 hour</option>
-            <option value="normal">Normal</option>
-          </Select>
+        <Select name="priority" defaultValue={priority ?? ''} aria-label="Priority">
+          <option value="">All priorities</option>
+          <option value="same_day">STAT (same day)</option>
+          <option value="priority_24h">24 hour</option>
+          <option value="priority_48h">48 hour</option>
+          <option value="normal">Normal</option>
+        </Select>
 
-          <Select name="category" defaultValue={category ?? ''} aria-label="Category">
-            <option value="">All categories</option>
-            <option value="chemistry">Chemistry</option>
-            <option value="microbiology">Microbiology</option>
-          </Select>
+        <Select name="category" defaultValue={category ?? ''} aria-label="Category">
+          <option value="">All categories</option>
+          <option value="chemistry">Chemistry</option>
+          <option value="microbiology">Microbiology</option>
+        </Select>
 
-          <Select name="analyst" defaultValue={analyst ?? ''} aria-label="Analyst">
-            <option value="">All analysts</option>
-            {staff?.map(a => (
-              <option key={a.id} value={a.id}>
-                {[a.first_name, a.last_name].filter(Boolean).join(' ') || a.email}
-              </option>
-            ))}
-          </Select>
+        <Select name="analyst" defaultValue={analyst ?? ''} aria-label="Analyst">
+          <option value="">All analysts</option>
+          {staff?.map(a => (
+            <option key={a.id} value={a.id}>
+              {[a.first_name, a.last_name].filter(Boolean).join(' ') || a.email}
+            </option>
+          ))}
+        </Select>
 
-          <Select name="reviewer" defaultValue={reviewer ?? ''} aria-label="Reviewer">
-            <option value="">All reviewers</option>
-            <option value="me">Assigned to me</option>
-            <option value="none">Unassigned</option>
-            {reviewerProfiles?.map(r => (
-              <option key={r.id} value={r.id}>
-                {[r.first_name, r.last_name].filter(Boolean).join(' ') || r.email}
-              </option>
-            ))}
-          </Select>
+        <Select name="reviewer" defaultValue={reviewer ?? ''} aria-label="Reviewer">
+          <option value="">All reviewers</option>
+          <option value="me">Assigned to me</option>
+          <option value="none">Unassigned</option>
+          {reviewerProfiles?.map(r => (
+            <option key={r.id} value={r.id}>
+              {[r.first_name, r.last_name].filter(Boolean).join(' ') || r.email}
+            </option>
+          ))}
+        </Select>
 
-          <Select name="due" defaultValue={due ?? ''} aria-label="Due date">
-            <option value="">Any due date</option>
-            <option value="overdue">Overdue</option>
-            <option value="week">Due within 7 days</option>
-          </Select>
-
-          <button type="submit" className={buttonClass('secondary', 'sm')}>
-            <Filter className="h-3 w-3" /> Apply
-          </button>
-          {hasFilters && (
-            <a href={`/admin/work-queue${status ? `?status=${status}` : ''}`}
-              className="px-1.5 text-[12px] text-ink-3 underline-offset-2 hover:text-ink hover:underline">
-              Clear
-            </a>
-          )}
-          <span className="ml-auto text-[12px] text-ink-3 tabular">{rows.length} shown</span>
-        </Toolbar>
-      </form>
+        <Select name="due" defaultValue={due ?? ''} aria-label="Due date">
+          <option value="">Any due date</option>
+          <option value="overdue">Overdue</option>
+          <option value="week">Due within 7 days</option>
+        </Select>
+      </FilterBar>
 
       <WorkQueueTable rows={rows as any} reviewers={reviewerProfiles ?? []} />
     </Page>

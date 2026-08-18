@@ -4,8 +4,10 @@ import { useState, useTransition } from 'react'
 
 import Link from 'next/link'
 import { toggleUserActive, deleteUser, resetUserPassword } from '@/app/actions/users'
-import { MoreVertical, KeyRound, Trash2, UserCheck, UserX, Edit } from 'lucide-react'
+import { MoreVertical, KeyRound, Trash2, UserCheck, UserX, Edit, Mail, Phone } from 'lucide-react'
 import toast, { Toaster } from 'react-hot-toast'
+import { cn } from '@/lib/utils'
+import { Badge, type Tone } from '@/components/ui/primitives'
 
 interface Profile {
   id: string
@@ -25,7 +27,12 @@ interface Props {
   profile: Profile
   isAdmin: boolean
   isSelf: boolean
-  roleColors: Record<string, string>
+}
+
+/* Role is a category, not a severity — each gets a distinct tone from
+   the shared palette, and the label always carries the meaning. */
+const ROLE_TONE: Record<string, Tone> = {
+  admin: 'crit', manager: 'review', analyst: 'info', client: 'ok',
 }
 
 function generatePassword(): string {
@@ -42,13 +49,15 @@ function generatePassword(): string {
   return pwd.split('').sort(() => Math.random() - 0.5).join('')
 }
 
-export default function UserCard({ profile, isAdmin, isSelf, roleColors }: Props) {
+export default function UserCard({ profile, isAdmin, isSelf }: Props) {
   const [open, setOpen] = useState(false)
   const [toggling, startToggle] = useTransition()
   const [deleting, startDelete] = useTransition()
   const [resetting, startReset] = useTransition()
 
   const fullName = [profile.first_name, profile.last_name].filter(Boolean).join(' ') || profile.email
+  const initials = (profile.first_name || profile.email)
+    .split(/[\s@.]+/).filter(Boolean).slice(0, 2).map(p => p[0]?.toUpperCase()).join('') || 'U'
   const specialties = profile.specialties_list ? profile.specialties_list.split(',').filter(Boolean) : []
   const depts = [
     profile.specialty_chemistry && 'Chemistry',
@@ -98,93 +107,119 @@ export default function UserCard({ profile, isAdmin, isSelf, roleColors }: Props
   }
 
   return (
-    <div className={`bg-white rounded-2xl border shadow-sm p-5 relative transition ${!profile.is_active ? 'opacity-60 border-slate-100' : 'border-slate-200'}`}>
+    <div
+      className={cn(
+        'relative flex flex-col rounded-lg border bg-surface shadow-xs transition-all',
+        profile.is_active
+          ? 'border-line hover:-translate-y-px hover:border-line-strong hover:shadow-sm'
+          : 'border-line bg-surface-muted',
+      )}
+    >
       <Toaster position="top-center" />
 
-      {/* Header */}
-      <div className="flex items-start justify-between mb-3">
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
-            <p className="font-semibold text-slate-900 truncate">{fullName}</p>
-            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${roleColors[profile.role] ?? 'bg-slate-100 text-slate-600'}`}>
-              {profile.role}
-            </span>
-            {!profile.is_active && (
-              <span className="text-xs px-2 py-0.5 rounded-full bg-slate-100 text-slate-400 font-medium">inactive</span>
-            )}
-          </div>
-          <p className="text-sm text-slate-400 truncate mt-0.5">{profile.email}</p>
-        </div>
+      <div className="flex items-start gap-3 px-4 py-3.5">
+        <span
+          className={cn(
+            'flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[12px] font-semibold',
+            profile.is_active ? 'bg-brand-600 text-white' : 'bg-surface-sunken text-ink-4',
+          )}
+          aria-hidden="true"
+        >
+          {initials}
+        </span>
 
-        {isAdmin && !isSelf && (
-          <div className="relative ml-2">
-            <button
-              onClick={() => setOpen(v => !v)}
-              className="p-1.5 text-slate-400 hover:text-slate-700 rounded-lg hover:bg-slate-100 transition"
-            >
-              <MoreVertical className="w-4 h-4" />
-            </button>
-            {open && (
-              <div className="absolute right-0 top-8 bg-white border border-slate-200 rounded-xl shadow-lg z-10 min-w-40 py-1">
-                <Link
-                  href={`/admin/users/${profile.id}`}
-                  className="flex items-center gap-2 px-4 py-2 text-sm text-slate-700 hover:bg-slate-50"
-                  onClick={() => setOpen(false)}
-                >
-                  <Edit className="w-3.5 h-3.5" /> Edit
-                </Link>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-start justify-between gap-2">
+            <p className={cn('truncate text-[13.5px] font-semibold', profile.is_active ? 'text-ink' : 'text-ink-3')}>
+              {fullName}
+              {isSelf && <span className="ml-1.5 text-[11px] font-normal text-ink-4">(you)</span>}
+            </p>
+
+            {isAdmin && !isSelf && (
+              <div className="relative -mt-0.5 -mr-1 shrink-0">
                 <button
-                  onClick={handleResetPassword}
-                  disabled={resetting}
-                  className="flex items-center gap-2 px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 w-full text-left disabled:opacity-50"
+                  onClick={() => setOpen(v => !v)}
+                  aria-label={`Actions for ${fullName}`}
+                  aria-expanded={open}
+                  className="flex h-7 w-7 items-center justify-center rounded-md text-ink-4 transition-colors hover:bg-surface-sunken hover:text-ink"
                 >
-                  <KeyRound className="w-3.5 h-3.5" /> Reset Password
+                  <MoreVertical className="h-4 w-4" />
                 </button>
-                {profile.role !== 'admin' && (
-                  <button
-                    onClick={handleToggle}
-                    disabled={toggling}
-                    className="flex items-center gap-2 px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 w-full text-left disabled:opacity-50"
-                  >
-                    {profile.is_active
-                      ? <><UserX className="w-3.5 h-3.5" /> Deactivate</>
-                      : <><UserCheck className="w-3.5 h-3.5" /> Activate</>
-                    }
-                  </button>
+                {open && (
+                  <div className="absolute right-0 top-8 z-20 min-w-44 overflow-hidden rounded-lg border border-line bg-surface py-1 shadow-pop">
+                    <Link
+                      href={`/admin/users/${profile.id}`}
+                      className="flex items-center gap-2 px-3 py-1.5 text-[12.5px] text-ink-2 hover:bg-surface-muted hover:text-ink"
+                      onClick={() => setOpen(false)}
+                    >
+                      <Edit className="h-3.5 w-3.5 text-ink-4" /> Edit
+                    </Link>
+                    <button
+                      onClick={handleResetPassword}
+                      disabled={resetting}
+                      className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12.5px] text-ink-2 hover:bg-surface-muted hover:text-ink disabled:opacity-50"
+                    >
+                      <KeyRound className="h-3.5 w-3.5 text-ink-4" /> Reset password
+                    </button>
+                    {profile.role !== 'admin' && (
+                      <button
+                        onClick={handleToggle}
+                        disabled={toggling}
+                        className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12.5px] text-ink-2 hover:bg-surface-muted hover:text-ink disabled:opacity-50"
+                      >
+                        {profile.is_active
+                          ? <><UserX className="h-3.5 w-3.5 text-ink-4" /> Deactivate</>
+                          : <><UserCheck className="h-3.5 w-3.5 text-ink-4" /> Activate</>}
+                      </button>
+                    )}
+                    <div className="my-1 border-t border-line" />
+                    <button
+                      onClick={handleDelete}
+                      disabled={deleting}
+                      className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12.5px] text-crit-fg hover:bg-crit-bg disabled:opacity-50"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" /> Delete
+                    </button>
+                  </div>
                 )}
-                <div className="border-t border-slate-100 my-1" />
-                <button
-                  onClick={handleDelete}
-                  disabled={deleting}
-                  className="flex items-center gap-2 px-4 py-2 text-sm text-red-500 hover:bg-red-50 w-full text-left disabled:opacity-50"
-                >
-                  <Trash2 className="w-3.5 h-3.5" /> Delete
-                </button>
               </div>
             )}
           </div>
-        )}
+
+          <p className="mt-0.5 flex items-center gap-1.5 truncate text-[12px] text-ink-3">
+            <Mail className="h-3 w-3 shrink-0 text-ink-4" />
+            <span className="truncate">{profile.email}</span>
+          </p>
+
+          <div className="mt-2 flex flex-wrap items-center gap-1">
+            <Badge tone={ROLE_TONE[profile.role] ?? 'neutral'} dot>
+              <span className="capitalize">{profile.role}</span>
+            </Badge>
+            {!profile.is_active && <Badge tone="neutral">Inactive</Badge>}
+          </div>
+        </div>
       </div>
 
-      {/* Details */}
-      <div className="space-y-1 text-sm">
-        {profile.phone_number && (
-          <p className="text-slate-500">{profile.phone_number}</p>
-        )}
-        {profile.role === 'client' && profile.company_name && (
-          <p className="text-slate-600 font-medium">{profile.company_name}</p>
-        )}
-        {profile.role === 'analyst' && depts.length > 0 && (
-          <div className="flex flex-wrap gap-1 mt-2">
-            {depts.map(d => (
-              <span key={d} className="text-xs bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full">{d}</span>
-            ))}
-            {specialties.map(s => (
-              <span key={s} className="text-xs bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full capitalize">{s}</span>
-            ))}
-          </div>
-        )}
-      </div>
+      {(profile.phone_number || (profile.role === 'client' && profile.company_name) || depts.length > 0 || specialties.length > 0) && (
+        <div className="mt-auto space-y-1.5 border-t border-line px-4 py-2.5">
+          {profile.role === 'client' && profile.company_name && (
+            <p className="truncate text-[12px] font-medium text-ink-2">{profile.company_name}</p>
+          )}
+          {profile.phone_number && (
+            <p className="flex items-center gap-1.5 text-[12px] text-ink-3">
+              <Phone className="h-3 w-3 shrink-0 text-ink-4" /> {profile.phone_number}
+            </p>
+          )}
+          {(depts.length > 0 || specialties.length > 0) && (
+            <div className="flex flex-wrap gap-1">
+              {depts.map(d => <Badge key={d} tone="brand">{d}</Badge>)}
+              {specialties.map(sp => (
+                <Badge key={sp} tone="neutral"><span className="capitalize">{sp}</span></Badge>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }

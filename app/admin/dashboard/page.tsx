@@ -364,7 +364,7 @@ export default async function AdminDashboard({ searchParams }: Props) {
       />
 
       {/* ── KPIs ───────────────────────────────────────────── */}
-      <div className="mb-3 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <KPICard
           label="Total orders" value={ordersNow.length} icon={ClipboardList}
           hint={`${openOrders.length} open right now`}
@@ -397,7 +397,7 @@ export default async function AdminDashboard({ searchParams }: Props) {
       </div>
 
       {/* ── Order activity + lifecycle ─────────────────────── */}
-      <div className="mb-3 grid gap-3 lg:grid-cols-3">
+      <div className="mb-4 grid gap-3 lg:grid-cols-3">
         <Card
           className="lg:col-span-2"
           title="Order activity"
@@ -432,13 +432,13 @@ export default async function AdminDashboard({ searchParams }: Props) {
       </div>
 
       {/* ── Performance · exceptions ───────────────────────── */}
-      <div className="mb-3 grid gap-3 lg:grid-cols-2">
+      <div className="mb-4 grid gap-3 lg:grid-cols-2">
         <PerformanceCard metrics={performance} subtitle={`Measured ${period.phrase}`} />
         <AttentionRequired items={attention} />
       </div>
 
       {/* ── Activity · my work ─────────────────────────────── */}
-      <div className="mb-3 grid gap-3 lg:grid-cols-2">
+      <div className="mb-4 grid gap-3 lg:grid-cols-2">
         <RecentActivity events={activity} href="/admin/system-logs" />
         <MyWork rows={myWork} href="/admin/work-queue?reviewer=me" />
       </div>
