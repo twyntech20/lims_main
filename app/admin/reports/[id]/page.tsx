@@ -40,7 +40,7 @@ export default async function ReportPage({ params }: Props) {
           mdl,
           analyst_notes,
           approved_at,
-          tests ( id, name, code, method, unit, category, reference_range ),
+          tests ( id, name, code, method, unit, category, reference_range, mdl ),
           entered_by_profile:profiles!sample_tests_entered_by_fkey ( first_name, last_name, email ),
           approved_by_profile:profiles!sample_tests_approved_by_fkey ( first_name, last_name, email )
         )

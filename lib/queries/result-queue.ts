@@ -37,7 +37,11 @@ export const RESULT_QUEUE_SELECT = `
     name,
     code,
     category,
-    unit
+    unit,
+    method,
+    mdl,
+    matrix,
+    unit_options
   ),
   entered_by_profile:profiles!sample_tests_entered_by_fkey ( id, first_name, last_name, email ),
   reviewed_by_profile:profiles!sample_tests_reviewed_by_fkey ( id, first_name, last_name, email ),

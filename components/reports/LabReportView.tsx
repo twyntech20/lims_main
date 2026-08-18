@@ -23,6 +23,7 @@ interface SampleTestRow {
     unit: string | null
     category: string | null
     reference_range: string | null
+    mdl: string | null
   } | null
   entered_by_profile: ProfileRef | null
   approved_by_profile: ProfileRef | null
@@ -71,6 +72,7 @@ function ResultsTable({ rows }: { rows: SampleTestRow[] }) {
           <th className="text-left px-6 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide">Test</th>
           <th className="text-left px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide">Result</th>
           <th className="text-left px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide">Unit</th>
+          <th className="text-left px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide">MDL</th>
           <th className="text-left px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide">Ref. Range</th>
           <th className="text-left px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide">Method</th>
           <th className="text-left px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide">Comments</th>
@@ -88,6 +90,9 @@ function ResultsTable({ rows }: { rows: SampleTestRow[] }) {
               </td>
               <td className="px-4 py-2.5 text-sm font-mono text-slate-700">{displayResult}</td>
               <td className="px-4 py-2.5 text-sm text-slate-500">{st.unit ?? test?.unit ?? '—'}</td>
+              {/* MDL as reported, falling back to the catalog value from the
+                  Master List of Analyses. */}
+              <td className="px-4 py-2.5 text-sm text-slate-500">{st.mdl ?? test?.mdl ?? '—'}</td>
               <td className="px-4 py-2.5 text-sm text-slate-500">{test?.reference_range ?? '—'}</td>
               <td className="px-4 py-2.5 text-sm text-slate-500">{test?.method ?? '—'}</td>
               <td className="px-4 py-2.5 text-xs text-slate-500 italic max-w-56">{st.analyst_notes ?? '—'}</td>

@@ -12,7 +12,7 @@ export default async function TestsPage({ searchParams }: Props) {
 
   let query = supabase
     .from('tests')
-    .select('id, name, code, category, method, unit, turnaround_days, is_active')
+    .select('id, name, code, category, method, unit, turnaround_days, is_active, matrix, tat_general, subcontracted')
     .order('category')
     .order('name')
 
@@ -106,7 +106,8 @@ export default async function TestsPage({ searchParams }: Props) {
                       <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Code</th>
                       <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Method</th>
                       <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Unit</th>
-                      <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">TAT (days)</th>
+                      <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Matrix</th>
+                      <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">TAT</th>
                       <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Status</th>
                       <th className="px-4 py-3" />
                     </tr>
@@ -114,11 +115,23 @@ export default async function TestsPage({ searchParams }: Props) {
                   <tbody className="divide-y divide-slate-50">
                     {items.map((test) => (
                       <tr key={test.id} className={`hover:bg-slate-50 transition ${!test.is_active ? 'opacity-50' : ''}`}>
-                        <td className="px-6 py-3 text-sm font-medium text-slate-900">{test.name}</td>
+                        <td className="px-6 py-3 text-sm font-medium text-slate-900">
+                          {test.name}
+                          {test.subcontracted && (
+                            <span className="ml-2 text-xs bg-amber-50 text-amber-700 border border-amber-200 px-1.5 py-0.5 rounded-full font-medium">
+                              sub-lab
+                            </span>
+                          )}
+                        </td>
                         <td className="px-4 py-3 text-sm text-slate-500 font-mono">{test.code ?? '—'}</td>
                         <td className="px-4 py-3 text-sm text-slate-500">{test.method ?? '—'}</td>
                         <td className="px-4 py-3 text-sm text-slate-500">{test.unit ?? '—'}</td>
-                        <td className="px-4 py-3 text-sm text-slate-500 text-center">{test.turnaround_days ?? '—'}</td>
+                        <td className="px-4 py-3 text-xs text-slate-500">{test.matrix ?? '—'}</td>
+                        {/* The workbook TAT is authoritative; the legacy
+                            integer is the fallback where it states none. */}
+                        <td className="px-4 py-3 text-sm text-slate-500">
+                          {test.tat_general ?? (test.turnaround_days != null ? `${test.turnaround_days} days` : '—')}
+                        </td>
                         <td className="px-4 py-3">
                           <TestToggle id={test.id} isActive={test.is_active} />
                         </td>

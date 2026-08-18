@@ -47,6 +47,10 @@ type SampleTest = {
     code: string | null
     category: string
     unit: string | null
+    method: string | null
+    mdl: string | null
+    matrix: string | null
+    unit_options: string | null
   } | null
   entered_by_profile: Person
   assigned_reviewer_profile: Person
@@ -76,7 +80,9 @@ function ResultRow({ st, reviewers }: { st: SampleTest; reviewers: Reviewer[] })
   const [result, setResult]               = useState(st.result ?? '')
   const [unit, setUnit]                   = useState(st.unit ?? st.tests?.unit ?? '')
   const [qualifier, setQualifier]         = useState(st.qualifier ?? '')
-  const [mdl, setMdl]                     = useState(st.mdl ?? '')
+  // MDL falls back to the analysis catalog (Master List of Analyses) so the
+  // analyst starts from the documented detection limit.
+  const [mdl, setMdl]                     = useState(st.mdl ?? st.tests?.mdl ?? '')
   const [dilution, setDilution]           = useState(st.dilution_factor?.toString() ?? '')
   const [notes, setNotes]                 = useState(st.analyst_notes ?? '')
   const [dirty, setDirty]                 = useState(false)
@@ -144,6 +150,7 @@ function ResultRow({ st, reviewers }: { st: SampleTest; reviewers: Reviewer[] })
         <td className="px-4 py-3">
           <div className="font-medium text-slate-900 text-sm">{st.tests?.name ?? '—'}</div>
           {st.tests?.code && <div className="text-xs text-slate-400 font-mono">{st.tests.code}</div>}
+          {st.tests?.method && <div className="text-xs text-slate-400">{st.tests.method}</div>}
           <span className={`mt-0.5 inline-block text-xs px-1.5 py-0.5 rounded-full ${
             st.tests?.category === 'microbiology' ? 'bg-green-50 text-green-700' : 'bg-blue-50 text-blue-700'
           }`}>{st.tests?.category}</span>
@@ -166,7 +173,9 @@ function ResultRow({ st, reviewers }: { st: SampleTest; reviewers: Reviewer[] })
           {isReadonly
             ? <span className="text-sm text-slate-500">{unit || '—'}</span>
             : <input value={unit} onChange={e => { setUnit(e.target.value); markDirty() }}
-                placeholder={st.tests?.unit ?? 'unit'} className={INPUT} />
+                placeholder={st.tests?.unit ?? 'unit'}
+                title={st.tests?.unit_options ? `Catalog units: ${st.tests.unit_options}` : undefined}
+                className={INPUT} />
           }
         </td>
 
@@ -190,7 +199,7 @@ function ResultRow({ st, reviewers }: { st: SampleTest; reviewers: Reviewer[] })
           {isReadonly
             ? <span className="text-sm text-slate-500">{mdl || '—'}</span>
             : <input value={mdl} onChange={e => { setMdl(e.target.value); markDirty() }}
-                placeholder="MDL" className={INPUT} />
+                placeholder={st.tests?.mdl ?? 'MDL'} className={INPUT} />
           }
         </td>
 
