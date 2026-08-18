@@ -168,7 +168,6 @@ export default async function AdminDashboard({ searchParams }: Props) {
 
   // ── Series ─────────────────────────────────────────────────
   const orderSeries    = countByDay(ordersNow.map(o => o.created_at), period.buckets)
-  const sampleSeries   = countByDay(samplesNow.map(s => s.created_at), period.buckets)
   const approvedSeries = countByDay(approvedNow.map(r => r.approved_at), period.buckets)
 
   const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
@@ -366,32 +365,31 @@ export default async function AdminDashboard({ searchParams }: Props) {
       {/* ── KPIs ───────────────────────────────────────────── */}
       <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <KPICard
-          label="Total orders" value={ordersNow.length} icon={ClipboardList}
+          label="Total orders" value={ordersNow.length} icon={ClipboardList} accent="brand"
           hint={`${openOrders.length} open right now`}
           trend={trend(ordersNow.length, ordersPrev.length)}
-          series={orderSeries} href="/admin/orders"
+          href="/admin/orders"
         />
         <KPICard
-          label="Samples" value={samplesNow.length} icon={FlaskConical}
+          label="Samples" value={samplesNow.length} icon={FlaskConical} accent="review"
           hint={`${samplesPending.length} awaiting processing`}
           trend={trend(samplesNow.length, samplesPrev.length)}
-          series={sampleSeries} href="/admin/orders"
+          href="/admin/orders"
         />
         <KPICard
-          label="Average TAT" value={formatHours(tatNow)} icon={Clock3}
-          hint={tatNow === null
-            ? 'Sample received → report released'
+          label="Average TAT" value={formatHours(tatNow)} icon={Clock3} accent="warn"
+          hint="Sample received → report released"
+          note={tatNow === null
+            ? 'No orders released in this period'
             : `Across ${releasedNow.length} released order${releasedNow.length === 1 ? '' : 's'}`}
           trend={tatNow !== null && tatPrev !== null ? trend(tatNow, tatPrev) : null}
           goodWhen="down"
-          note={tatNow === null ? 'No orders released in this period' : undefined}
           href="/admin/orders?status=completed"
         />
         <KPICard
-          label="Results approved" value={approvedNow.length} icon={FileCheck2}
+          label="Results approved" value={approvedNow.length} icon={FileCheck2} accent="ok"
           hint={`${readyToRelease} report${readyToRelease === 1 ? '' : 's'} ready to release`}
           trend={trend(approvedNow.length, approvedPrev.length)}
-          series={approvedSeries} seriesTone="ok"
           href="/admin/work-queue?status=approved"
         />
       </div>
