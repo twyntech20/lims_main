@@ -222,7 +222,7 @@ export async function submitToClient(orderId: string) {
 
   const { data: order } = await supabase
     .from('orders')
-    .select('id, order_number, status, assigned_analyst_id, released_at')
+    .select('id, order_number, status, assigned_analyst_id, released_at, date_completed')
     .eq('id', orderId)
     .single()
   if (!order) throw new Error('Order not found')
@@ -234,7 +234,12 @@ export async function submitToClient(orderId: string) {
     throw new Error('Only the assigned analyst (or an admin) can submit this order to the client')
   }
 
-  if (order.released_at || order.status === 'completed') {
+  // Release is what `released_at` records, and nothing else. Completion is a
+  // separate fact: check_order_completion moves an order to 'completed' on its
+  // own once every sample finishes, without releasing anything. Treating that
+  // as "already released" left trigger-completed orders permanently unable to
+  // go out — approved, complete, and refused by this guard.
+  if (order.released_at) {
     throw new Error('This order has already been released to the client')
   }
 
@@ -268,7 +273,7 @@ export async function submitToClient(orderId: string) {
     .from('orders')
     .update({
       status:         'completed',
-      date_completed: releasedAt,
+      date_completed: order.date_completed ?? releasedAt,
       released_by:    user.id,      // who authorised the release
       released_at:    releasedAt,   // and when
     })

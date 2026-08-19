@@ -145,21 +145,18 @@ export function validateReviewComment(comment: string | null | undefined, label 
 /**
  * Whether an order has gone out to the client.
  *
- * Mirrors the guard in submitToClient exactly: an order counts as released
- * once `released_at` is stamped OR its status reaches 'completed'. The two
- * are not equivalent in practice — `released_at` is written only by the
- * release action, while check_order_completion moves an order to 'completed'
- * on its own once every sample finishes. Orders that complete through the
- * trigger therefore carry a null `released_at`.
+ * Release is recorded by `released_at`, stamped only by submitToClient.
+ * Completion is a different fact — check_order_completion moves an order to
+ * 'completed' by itself once every sample finishes — so a completed order
+ * with a null `released_at` is *ready to release*, not released.
  *
- * The UI used to test `released_at` alone, so those orders kept offering an
- * actionable "Submit to Client" button that the server then refused with
- * "This order has already been released to the client". Reading release
- * state through this helper keeps every screen agreeing with the action.
+ * Keeping the two apart is what lets an order that completed through the
+ * trigger still be sent to the client, while a released one can never be
+ * released twice.
  */
 export function isOrderReleased(order: {
   released_at?: string | null
   status?: string | null
 }): boolean {
-  return Boolean(order.released_at) || order.status === 'completed'
+  return Boolean(order.released_at)
 }
