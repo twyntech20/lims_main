@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState } from 'react'
 import Script from 'next/script'
 import { MapPin, Loader2 } from 'lucide-react'
+import { cn } from '@/lib/utils'
+import { FIELD } from '@/components/ui/primitives'
 
 export interface AddressFields {
   address: string
@@ -18,7 +20,20 @@ interface Props {
   error?: string
 }
 
-const API_KEY = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY!
+/**
+ * Google Places lookup is an optional convenience, not a dependency.
+ * The key is inlined at build time; when it is absent the script is
+ * never requested — loading it with `key=undefined` is what produced
+ * InvalidKeyMapError in the console and left the field spinning
+ * forever. Without a key (or when the script fails to load) this
+ * degrades to a plain address input that still submits correctly.
+ */
+const API_KEY = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY
+
+/** Lets a form tell the user whether suggestions are actually available. */
+export const ADDRESS_AUTOCOMPLETE_ENABLED = Boolean(API_KEY)
+
+type Status = 'unavailable' | 'loading' | 'ready' | 'failed'
 
 export default function AddressAutocomplete({
   defaultValue = '',
@@ -27,11 +42,16 @@ export default function AddressAutocomplete({
   error,
 }: Props) {
   const inputRef = useRef<HTMLInputElement>(null)
-  const [ready, setReady] = useState(false)
+  const [status, setStatus] = useState<Status>(API_KEY ? 'loading' : 'unavailable')
   const [value, setValue] = useState(defaultValue)
 
   function initAutocomplete() {
-    if (!inputRef.current || !window.google?.maps?.places) return
+    if (!inputRef.current || !window.google?.maps?.places) {
+      // The script resolved but the Places library is missing — treat it
+      // as unavailable rather than leaving a permanent spinner.
+      setStatus('failed')
+      return
+    }
 
     const ac = new window.google.maps.places.Autocomplete(inputRef.current, {
       componentRestrictions: { country: 'us' },
@@ -60,25 +80,25 @@ export default function AddressAutocomplete({
       onAddressSelect({ address: addr, city, state, zip })
     })
 
-    setReady(true)
+    setStatus('ready')
   }
 
   // If Google Maps already loaded (e.g. navigating back to page), init immediately
   useEffect(() => {
-    if (window.google?.maps?.places) {
-      initAutocomplete()
-    }
+    if (!API_KEY) return
+    if (window.google?.maps?.places) initAutocomplete()
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
-
-  const borderCls = error ? 'border-red-400 focus:ring-red-400' : 'border-slate-200'
 
   return (
     <>
-      <Script
-        src={`https://maps.googleapis.com/maps/api/js?key=${API_KEY}&libraries=places`}
-        strategy="lazyOnload"
-        onLoad={initAutocomplete}
-      />
+      {API_KEY && (
+        <Script
+          src={`https://maps.googleapis.com/maps/api/js?key=${API_KEY}&libraries=places`}
+          strategy="lazyOnload"
+          onLoad={initAutocomplete}
+          onError={() => setStatus('failed')}
+        />
+      )}
       <div className="relative">
         <input
           ref={inputRef}
@@ -87,14 +107,21 @@ export default function AddressAutocomplete({
           onChange={e => setValue(e.target.value)}
           placeholder={placeholder}
           autoComplete="off"
-          className={`w-full bg-slate-50 border ${borderCls} rounded-xl px-3 py-2.5 pr-9 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500`}
+          aria-invalid={error ? true : undefined}
+          className={cn(
+            FIELD,
+            'w-full',
+            status === 'loading' || status === 'ready' ? 'pr-9' : 'pr-2.5',
+            error && 'border-crit-line focus:border-crit-fg',
+          )}
         />
-        <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
-          {!ready
-            ? <Loader2 className="w-4 h-4 text-slate-300 animate-spin" />
-            : <MapPin className="w-4 h-4 text-slate-400" />
-          }
-        </div>
+        {(status === 'loading' || status === 'ready') && (
+          <div className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2">
+            {status === 'loading'
+              ? <Loader2 className="h-3.5 w-3.5 animate-spin text-ink-4" />
+              : <MapPin className="h-3.5 w-3.5 text-ink-4" />}
+          </div>
+        )}
       </div>
     </>
   )

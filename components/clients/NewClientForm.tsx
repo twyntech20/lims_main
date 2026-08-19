@@ -7,7 +7,7 @@ import Link from 'next/link'
 import { Loader2 } from 'lucide-react'
 import toast, { Toaster } from 'react-hot-toast'
 import { PATTERNS, US_STATES } from '@/lib/validation'
-import AddressAutocomplete from '@/components/ui/AddressAutocomplete'
+import AddressAutocomplete, { ADDRESS_AUTOCOMPLETE_ENABLED } from '@/components/ui/AddressAutocomplete'
 
 const US_STATE_LIST = Array.from(US_STATES).sort()
 const TAGS = ['soil', 'food', 'water', 'chemistry', 'microbiology', 'legionella']
@@ -127,7 +127,9 @@ export default function NewClientForm() {
       {/* Address */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-4">
         <h2 className="font-semibold text-slate-900">Address</h2>
-        <p className="text-xs text-slate-400 -mt-2">Start typing and select from the suggestions to auto-fill</p>
+        {ADDRESS_AUTOCOMPLETE_ENABLED && (
+          <p className="-mt-2 text-[12px] text-ink-4">Start typing and select from the suggestions to auto-fill</p>
+        )}
         <div>
           <label className="block text-sm font-medium text-slate-700 mb-1.5">Street Address</label>
           <AddressAutocomplete
