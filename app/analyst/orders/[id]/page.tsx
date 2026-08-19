@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { ArrowLeft, Calendar, FileText, User } from 'lucide-react'
 import { formatDate, formatDateTime, getOrderStatusColor, getPriorityColor, getPriorityLabel } from '@/lib/utils'
 import SubmitToClientPanel from '@/components/orders/SubmitToClientPanel'
-import { personName } from '@/lib/workflow'
+import { personName, isOrderReleased } from '@/lib/workflow'
 
 const STATUS_LABELS: Record<string, string> = {
   new: 'New', submitted: 'Submitted', in_progress: 'In Progress',
@@ -53,7 +53,7 @@ export default async function AnalystOrderDetailPage({ params }: Props) {
   const allApproved = allSampleTests.length > 0 && allSampleTests.every((st: any) => st.status === 'approved')
   const hasAnyApproved = allSampleTests.some((st: any) => st.status === 'approved')
   const isOverdue = order.date_due && new Date(order.date_due) < new Date() && order.status !== 'completed'
-  const isReleased = !!(order as any).released_at
+  const isReleased = isOrderReleased(order as any)
 
   const approvedRows = allSampleTests
     .filter((st: any) => st.status === 'approved')
@@ -185,11 +185,15 @@ export default async function AnalystOrderDetailPage({ params }: Props) {
             <div className="bg-green-50 border border-green-200 rounded-2xl p-5">
               <div className="flex items-center gap-2 mb-2">
                 <FileText className="w-5 h-5 text-green-600 shrink-0" />
-                <p className="text-sm text-green-800 font-medium">Released to client</p>
+                <p className="text-sm text-green-800 font-medium">Submitted to Client</p>
               </div>
               <div className="text-sm text-green-800 space-y-1">
-                <p>Released by <span className="font-medium">{personName((order as any).released_by_profile)}</span></p>
-                <p>{formatDateTime((order as any).released_at)}</p>
+                <p>This order has already been released to the client.</p>
+                {/* Trigger-completed orders carry no release attribution. */}
+                {(order as any).released_by_profile && (
+                  <p>Released by <span className="font-medium">{personName((order as any).released_by_profile)}</span></p>
+                )}
+                {(order as any).released_at && <p>{formatDateTime((order as any).released_at)}</p>}
               </div>
             </div>
           ) : allApproved ? (
@@ -198,6 +202,9 @@ export default async function AnalystOrderDetailPage({ params }: Props) {
               orderNumber={order.order_number}
               clientName={(order as any).clients?.client_name ?? order.customer_name ?? '—'}
               rows={approvedRows}
+              released={isReleased}
+              releasedAt={(order as any).released_at}
+              releasedBy={(order as any).released_by_profile ? personName((order as any).released_by_profile) : null}
             />
           ) : (
             <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">

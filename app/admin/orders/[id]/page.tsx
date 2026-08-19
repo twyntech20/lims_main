@@ -7,7 +7,7 @@ import AssignAnalystForm from '@/components/orders/AssignAnalystForm'
 import UpdateStatusForm from '@/components/orders/UpdateStatusForm'
 import AddSampleForm from '@/components/orders/AddSampleForm'
 import SubmitToClientPanel from '@/components/orders/SubmitToClientPanel'
-import { personName, workflowState, WORKFLOW_LABEL, waitingTime, isOverdue } from '@/lib/workflow'
+import { personName, workflowState, WORKFLOW_LABEL, waitingTime, isOverdue, isOrderReleased } from '@/lib/workflow'
 import {
   Page, Section, Panel, Badge, Mono, ButtonLink, EmptyState,
   Table, Th, Td, Tr, TableWrap, type Tone,
@@ -79,7 +79,7 @@ export default async function AdminOrderDetailPage({ params }: Props) {
   const notApproved = allSampleTests.filter((st: any) => st.status !== 'approved')
   const approvedCount = allSampleTests.length - notApproved.length
   const readyToRelease = allSampleTests.length > 0 && notApproved.length === 0
-  const isReleased = !!order.released_at
+  const isReleased = isOrderReleased(order)
   const overdue = isOverdue(order.date_due) && !['completed', 'cancelled'].includes(order.status)
   const meta = STATUS[order.status] ?? { label: order.status, tone: 'neutral' as Tone }
 
@@ -334,11 +334,18 @@ export default async function AdminOrderDetailPage({ params }: Props) {
           <Section title="Release">
             {isReleased ? (
               <div className="rounded-lg border border-ok-line bg-ok-bg p-3.5">
-                <p className="text-[13px] font-medium text-ok-fg">Released to client</p>
+                <p className="text-[13px] font-medium text-ok-fg">Submitted to Client</p>
                 <p className="mt-1.5 text-[12px] text-ink-2">
-                  by {personName(order.released_by_profile)}
+                  This order has already been released to the client.
                 </p>
-                <p className="tabular text-[12px] text-ink-3">{formatDateTime(order.released_at)}</p>
+                {/* Orders completed by the check_order_completion trigger carry
+                    no release attribution, so both lines are conditional. */}
+                {order.released_by_profile && (
+                  <p className="mt-1 text-[12px] text-ink-2">by {personName(order.released_by_profile)}</p>
+                )}
+                {order.released_at && (
+                  <p className="tabular text-[12px] text-ink-3">{formatDateTime(order.released_at)}</p>
+                )}
                 <ButtonLink href={`/admin/reports/${order.id}`} size="sm" className="mt-3">
                   <FileText className="h-3 w-3" /> View approved report
                 </ButtonLink>
@@ -349,6 +356,9 @@ export default async function AdminOrderDetailPage({ params }: Props) {
                 orderNumber={order.order_number}
                 clientName={order.clients?.client_name ?? order.customer_name ?? '—'}
                 rows={approvedRows}
+                released={isReleased}
+                releasedAt={order.released_at}
+                releasedBy={order.released_by_profile ? personName(order.released_by_profile) : null}
               />
             ) : (
               <Panel padded>

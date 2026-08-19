@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useTransition } from 'react'
+import { useRouter } from 'next/navigation'
 import toast, { Toaster } from 'react-hot-toast'
 import { submitToClient } from '@/app/actions/orders'
 import { Send, CheckCircle2, Loader2, ShieldCheck } from 'lucide-react'
@@ -21,32 +22,70 @@ interface Props {
   orderNumber: string
   clientName: string
   rows: ApprovedRow[]
+  /**
+   * Release state as the server sees it. The panel refuses to offer the
+   * action when this is true, so a caller that forgets to gate cannot
+   * put an actionable release button in front of a released order.
+   */
+  released?: boolean
+  releasedAt?: string | null
+  releasedBy?: string | null
 }
 
-export default function SubmitToClientPanel({ orderId, orderNumber, clientName, rows }: Props) {
+export default function SubmitToClientPanel({
+  orderId, orderNumber, clientName, rows, released = false, releasedAt, releasedBy,
+}: Props) {
+  const router = useRouter()
   const [confirming, setConfirming] = useState(false)
   const [pending, startTransition] = useTransition()
   const [done, setDone] = useState(false)
 
+  // Server truth wins; `done` only covers the gap between a successful
+  // submit and the refreshed server render arriving.
+  const isReleased = released || done
+
   function handleConfirm() {
+    if (pending || isReleased) return
     startTransition(async () => {
       try {
         await submitToClient(orderId)
         toast.success('Submitted to client')
         setDone(true)
         setConfirming(false)
+        // Pull the refreshed server state so the status badge, timeline and
+        // report link update with the panel — no manual reload needed.
+        router.refresh()
       } catch (err: any) {
-        toast.error(err.message ?? 'Failed to submit')
+        const message = err?.message ?? 'Failed to submit'
+        // A duplicate attempt means the order is already out. Reflect that
+        // instead of leaving an actionable button on screen.
+        if (/already been released/i.test(message)) {
+          setDone(true)
+          setConfirming(false)
+          router.refresh()
+        }
+        toast.error(message)
       }
     })
   }
 
-  if (done) {
+  if (isReleased) {
     return (
-      <div className="bg-green-50 border border-green-200 rounded-2xl p-5 flex items-center gap-3">
+      <div className="rounded-lg border border-ok-line bg-ok-bg p-3.5">
         <Toaster position="top-center" />
-        <CheckCircle2 className="w-5 h-5 text-green-600 shrink-0" />
-        <p className="text-sm text-green-800 font-medium">Submitted to client — this order is now complete.</p>
+        <div className="flex items-center gap-2">
+          <CheckCircle2 className="h-4 w-4 shrink-0 text-ok-fg" />
+          <p className="text-[13px] font-medium text-ok-fg">Submitted to Client</p>
+        </div>
+        <p className="mt-1.5 text-[12px] text-ink-2">
+          This order has already been released to the client.
+        </p>
+        {releasedBy && <p className="mt-1 text-[12px] text-ink-2">by {releasedBy}</p>}
+        {releasedAt && (
+          <p className="tabular text-[12px] text-ink-3">
+            {new Date(releasedAt).toLocaleString('en-AU')}
+          </p>
+        )}
       </div>
     )
   }
