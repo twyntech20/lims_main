@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
 import { notFound } from 'next/navigation'
+import { resolvePortalClientId, canPortalUserViewOrder } from '@/lib/queries/client-portal'
 import Link from 'next/link'
 import { ArrowLeft, FlaskConical } from 'lucide-react'
 import { formatDate, formatDateTime, getOrderStatusColor, getPriorityLabel, getPriorityColor } from '@/lib/utils'
@@ -45,8 +46,11 @@ export default async function ClientOrderDetailPage({ params }: Props) {
 
   const o = order as any
 
-  // Make sure this order belongs to the current portal user
-  if (o.created_by !== user.id) notFound()
+  // Ownership is the client this order belongs to — the same rule the order
+  // list uses. Authorising on created_by alone hid every order the lab raised
+  // on the client's behalf: it appeared in the list and then 404'd on open.
+  const clientId = await resolvePortalClientId(supabase, user.id)
+  if (!canPortalUserViewOrder(o, clientId, user.id)) notFound()
 
   const completedTests = o.samples?.flatMap((s: any) =>
     s.sample_tests?.filter((st: any) => st.status === 'approved')

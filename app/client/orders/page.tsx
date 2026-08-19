@@ -2,6 +2,7 @@ import { createClient } from '@/lib/supabase/server'
 import { formatDate } from '@/lib/utils'
 import Link from 'next/link'
 import { PlusCircle } from 'lucide-react'
+import { resolvePortalClientId } from '@/lib/queries/client-portal'
 
 const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
   new: { label: 'Draft', color: 'bg-gray-100 text-gray-700' },
@@ -16,18 +17,15 @@ export default async function ClientOrdersPage() {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
 
-  const { data: profile } = await supabase
-    .from('profiles').select('company_name').eq('id', user!.id).single()
+  const clientId = await resolvePortalClientId(supabase, user!.id)
 
-  const { data: client } = profile?.company_name
-    ? await supabase.from('clients').select('id').ilike('client_name', profile.company_name).single()
-    : { data: null }
-
-  const { data: orders } = await supabase
-    .from('orders')
-    .select('id, order_number, status, priority, date_received, date_due, date_completed')
-    .eq('client_id', client?.id ?? '')
-    .order('created_at', { ascending: false })
+  const { data: orders } = clientId
+    ? await supabase
+        .from('orders')
+        .select('id, order_number, status, priority, date_received, date_due, date_completed')
+        .eq('client_id', clientId)
+        .order('created_at', { ascending: false })
+    : { data: [] }
 
   return (
     <div className="p-6 max-w-5xl mx-auto">
