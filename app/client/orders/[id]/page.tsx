@@ -153,7 +153,7 @@ export default async function ClientOrderDetailPage({ params }: Props) {
         </div>
 
         {/* Order info sidebar */}
-        <div className="space-y-4">
+        <div className="min-w-0 space-y-4">
           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
             <h2 className="font-semibold text-slate-900 mb-4">Timeline</h2>
             <div className="space-y-3 text-sm">
@@ -173,7 +173,7 @@ export default async function ClientOrderDetailPage({ params }: Props) {
           {o.notes && (
             <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
               <h2 className="font-semibold text-slate-900 mb-2">Notes</h2>
-              <p className="text-slate-600 text-sm whitespace-pre-wrap">{o.notes}</p>
+              <p className="max-h-96 overflow-y-auto break-words pr-1 text-sm text-slate-600 whitespace-pre-wrap">{o.notes}</p>
             </div>
           )}
 
