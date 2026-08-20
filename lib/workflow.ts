@@ -160,3 +160,61 @@ export function isOrderReleased(order: {
 }): boolean {
   return Boolean(order.released_at)
 }
+
+/* ============================================================
+   Laboratory specialty (department) eligibility.
+   ============================================================ */
+
+/** The specialty flags carried on a profile, plus the role that can override them. */
+export interface SpecialtyProfile {
+  role?: string | null
+  specialty_chemistry?: boolean | null
+  specialty_microbiology?: boolean | null
+}
+
+/** Departments the catalog actually uses — tests.category. */
+export type LabCategory = 'chemistry' | 'microbiology'
+
+export function isLabCategory(category: string | null | undefined): category is LabCategory {
+  return category === 'chemistry' || category === 'microbiology'
+}
+
+/**
+ * Whether a person may take on work in a given laboratory department.
+ *
+ * Specialty is held as two booleans on the profile — specialty_chemistry and
+ * specialty_microbiology — and the catalog's tests.category names the same two
+ * departments. This matches one against the other.
+ *
+ * Three deliberate exemptions:
+ *
+ *  - Admins and managers are never gated by specialty, consistent with every
+ *    other authorization check in the result actions (isStaffAdmin).
+ *  - A category outside the two known departments has nothing to match on, so
+ *    it does not restrict anyone.
+ *  - An analyst with neither flag set is unconfigured rather than unqualified.
+ *    Gating them would strand accounts that predate specialty being recorded —
+ *    analyst2@fqlabs.test is one — and silently remove access nobody asked to
+ *    remove. Setting either flag opts the account into the restriction.
+ */
+export function isQualifiedForCategory(
+  profile: SpecialtyProfile | null | undefined,
+  category: string | null | undefined,
+): boolean {
+  if (!profile) return false
+  if (profile.role === 'admin' || profile.role === 'manager') return true
+  if (!isLabCategory(category)) return true
+
+  const chemistry = profile.specialty_chemistry === true
+  const microbiology = profile.specialty_microbiology === true
+  if (!chemistry && !microbiology) return true
+
+  return category === 'chemistry' ? chemistry : microbiology
+}
+
+/** Human name for a department, for error messages. */
+export function labCategoryLabel(category: string | null | undefined): string {
+  return category === 'chemistry' ? 'Chemistry'
+    : category === 'microbiology' ? 'Microbiology'
+    : String(category ?? 'this department')
+}

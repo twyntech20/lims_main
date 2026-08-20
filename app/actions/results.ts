@@ -4,7 +4,13 @@ import { createClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { assertNoErrors } from '@/lib/validation'
-import { validateResultEntry, validateReviewComment, type ResultEntryPayload } from '@/lib/workflow'
+import {
+  validateResultEntry,
+  validateReviewComment,
+  type ResultEntryPayload,
+  isQualifiedForCategory,
+  labCategoryLabel,
+} from '@/lib/workflow'
 
 type Supabase = Awaited<ReturnType<typeof createClient>>
 
@@ -29,7 +35,7 @@ async function loadResultContext(supabase: Supabase, sampleTestId: string) {
     .select(`
       id, status, result, unit, qualifier, mdl, dilution_factor, analyst_notes,
       entered_by, assigned_reviewer_id, returned_at, review_round,
-      tests ( unit ),
+      tests ( unit, category ),
       samples!inner ( id, order_id, orders!inner ( id, status, released_at, assigned_analyst_id ) )
     `)
     .eq('id', sampleTestId)
@@ -42,14 +48,42 @@ async function loadResultContext(supabase: Supabase, sampleTestId: string) {
   return {
     row:         data as any,
     catalogUnit: (data.tests as any)?.unit as string | null,
+    catalogCategory: (data.tests as any)?.category as string | null,
     sampleId:    sample?.id as string,
     order:       order as { id: string; status: string; released_at: string | null; assigned_analyst_id: string | null },
   }
 }
 
 async function loadProfile(supabase: Supabase, userId: string) {
-  const { data } = await supabase.from('profiles').select('role, can_review').eq('id', userId).single()
-  return data as { role: string; can_review: boolean } | null
+  const { data } = await supabase
+    .from('profiles')
+    .select('role, can_review, specialty_chemistry, specialty_microbiology')
+    .eq('id', userId)
+    .single()
+  return data as {
+    role: string
+    can_review: boolean
+    specialty_chemistry: boolean | null
+    specialty_microbiology: boolean | null
+  } | null
+}
+
+/**
+ * A result belongs to a laboratory department (tests.category). Only someone
+ * qualified in that department may take it on. Enforced here, in the action
+ * layer, so it holds for a direct server-action call and not just for a UI
+ * that hides the option.
+ */
+function assertQualifiedForCategory(
+  profile: Parameters<typeof isQualifiedForCategory>[0],
+  category: string | null,
+  subject: 'You are' | 'The selected reviewer is',
+) {
+  if (isQualifiedForCategory(profile, category)) return
+  throw new Error(
+    `${subject} not qualified for ${labCategoryLabel(category)} work — ` +
+    'this result belongs to a department outside the assigned specialty',
+  )
 }
 
 function isStaffAdmin(profile: { role: string } | null) {
@@ -103,6 +137,7 @@ async function assertResultEditable(
   if (row.entered_by && !isOwner && !isStaffAdmin(profile)) {
     throw new Error('Only the analyst who entered this result (or an admin) can change it')
   }
+  assertQualifiedForCategory(profile, ctx.catalogCategory, 'You are')
 }
 
 async function writeResult(sampleTestId: string, payload: ResultEntryPayload, analystNotes: string | null) {
@@ -174,13 +209,19 @@ export async function submitSampleForReview(sampleTestId: string, reviewerId: st
   if (!reviewerId) throw new Error('Select a reviewer to assign this result to')
 
   const { data: reviewer } = await supabase
-    .from('profiles').select('role, can_review, is_active').eq('id', reviewerId).single()
+    .from('profiles')
+    .select('role, can_review, is_active, specialty_chemistry, specialty_microbiology')
+    .eq('id', reviewerId)
+    .single()
   const reviewerOk = reviewer?.role === 'admin' || reviewer?.role === 'manager' || reviewer?.can_review === true
   if (!reviewerOk) throw new Error('Selected reviewer is not authorized to review results')
   if (reviewer?.is_active === false) throw new Error('Selected reviewer is no longer active')
   if (reviewerId === user.id) throw new Error('You cannot assign a review to yourself')
 
   const ctx = await loadResultContext(supabase, sampleTestId)
+  // A reviewer must be qualified in the result's department, or chemistry
+  // work could be signed off by a microbiology-only reviewer.
+  assertQualifiedForCategory(reviewer, ctx.catalogCategory, 'The selected reviewer is')
   if (ctx.order?.released_at) throw new Error('This order has already been released')
   if (ctx.row.status !== 'entered') {
     throw new Error('Only a result that has been entered can be sent for review')
