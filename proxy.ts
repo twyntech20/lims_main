@@ -46,8 +46,20 @@ export async function proxy(request: NextRequest) {
         .eq('id', user.id)
         .single()
 
-      const home = ROLE_HOME[profile?.role ?? 'client']
-      return NextResponse.redirect(new URL(home, request.url))
+      const loginRole = profile?.role ?? 'client'
+
+      // Standing on the login page of a portal you do not belong to is the
+      // same mismatch as reaching one of its routes, so it gets the same
+      // explanation. Without this the case is silently resolved by sending
+      // the user to their own portal, and it is reachable whenever the
+      // ?portal hint is absent — a bookmark, a refresh, or the cross-portal
+      // link each login page offers.
+      const loginPortal = pathname === '/client-login' ? 'client' : 'staff'
+      if (portalForRole(loginRole) !== loginPortal) {
+        return NextResponse.redirect(new URL(ACCESS_DENIED_PATH, request.url))
+      }
+
+      return NextResponse.redirect(new URL(ROLE_HOME[loginRole], request.url))
     }
     return supabaseResponse
   }
