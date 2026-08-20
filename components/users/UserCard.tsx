@@ -4,10 +4,10 @@ import { useState, useTransition } from 'react'
 
 import Link from 'next/link'
 import { toggleUserActive, deleteUser, resetUserPassword } from '@/app/actions/users'
-import { MoreVertical, KeyRound, Trash2, UserCheck, UserX, Edit, Mail, Phone } from 'lucide-react'
+import { MoreVertical, KeyRound, Trash2, UserCheck, UserX, Edit, Mail, Phone, Copy } from 'lucide-react'
 import toast, { Toaster } from 'react-hot-toast'
 import { cn } from '@/lib/utils'
-import { Badge, type Tone } from '@/components/ui/primitives'
+import { Badge, buttonClass, type Tone } from '@/components/ui/primitives'
 
 interface Profile {
   id: string
@@ -54,6 +54,8 @@ export default function UserCard({ profile, isAdmin, isSelf }: Props) {
   const [toggling, startToggle] = useTransition()
   const [deleting, startDelete] = useTransition()
   const [resetting, startReset] = useTransition()
+  // Holds a password only once Supabase has confirmed the change.
+  const [issuedPassword, setIssuedPassword] = useState<string | null>(null)
 
   const fullName = [profile.first_name, profile.last_name].filter(Boolean).join(' ') || profile.email
   const initials = (profile.first_name || profile.email)
@@ -93,17 +95,33 @@ export default function UserCard({ profile, isAdmin, isSelf }: Props) {
 
   function handleResetPassword() {
     setOpen(false)
+    // The password is generated here but deliberately not shown yet: it is
+    // only a real credential once Supabase has accepted it. Revealing it at
+    // confirmation time meant a failed update still handed the administrator
+    // a password to copy, which then could not be used to sign in.
     const newPwd = generatePassword()
-    if (!confirm(`Reset password for "${fullName}"?\n\nNew password: ${newPwd}\n\nCopy this — it won't be shown again.`)) return
+    if (!confirm(`Reset the password for "${fullName}"?\n\nA new password will be generated and shown once the change is saved.`)) return
     startReset(async () => {
       try {
         await resetUserPassword(profile.id, newPwd)
-        toast.success('Password reset. User will be prompted to change on next login.')
+        setIssuedPassword(newPwd)
+        toast.success('Password reset. User will be prompted to change it on next login.')
       } catch (err: any) {
         if (err?.digest?.startsWith('NEXT_REDIRECT')) throw err
-        toast.error(err.message ?? 'Failed')
+        setIssuedPassword(null)
+        toast.error(err?.message ?? 'Password reset failed — the password was not changed')
       }
     })
+  }
+
+  async function copyIssuedPassword() {
+    if (!issuedPassword) return
+    try {
+      await navigator.clipboard.writeText(issuedPassword)
+      toast.success('Password copied')
+    } catch {
+      toast.error('Could not copy — select the password and copy it manually')
+    }
   }
 
   return (
@@ -199,6 +217,28 @@ export default function UserCard({ profile, isAdmin, isSelf }: Props) {
           </div>
         </div>
       </div>
+
+      {issuedPassword && (
+        <div className="border-t border-ok-line bg-ok-bg px-4 py-3">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.06em] text-ok-fg">
+            New password — saved
+          </p>
+          <p className="mt-1.5 break-all rounded-md border border-ok-line bg-surface px-2 py-1.5 font-mono text-[12.5px] text-ink">
+            {issuedPassword}
+          </p>
+          <p className="mt-1.5 text-[11.5px] text-ink-2">
+            Copy this — it won&rsquo;t be shown again.
+          </p>
+          <div className="mt-2 flex gap-2">
+            <button onClick={copyIssuedPassword} className={buttonClass('secondary', 'sm')}>
+              <Copy className="h-3 w-3" /> Copy
+            </button>
+            <button onClick={() => setIssuedPassword(null)} className={buttonClass('ghost', 'sm')}>
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
 
       {(profile.phone_number || (profile.role === 'client' && profile.company_name) || depts.length > 0 || specialties.length > 0) && (
         <div className="mt-auto space-y-1.5 border-t border-line px-4 py-2.5">
