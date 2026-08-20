@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import Sidebar from '@/components/layout/Sidebar'
+import { ACCESS_DENIED_PATH, portalForRole } from '@/lib/auth/portal'
 
 export default async function ClientLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createClient()
@@ -14,7 +15,11 @@ export default async function ClientLayout({ children }: { children: React.React
     .eq('id', user.id)
     .single()
 
-  if (!profile || (profile as any).role !== 'client') redirect('/client-login')
+  // Defence in depth behind the middleware: a staff role that somehow reaches
+  // the client portal is explained, not bounced to a login page it is already
+  // past. Children never render for a refused request.
+  if (!profile) redirect('/client-login')
+  if (portalForRole((profile as any).role) !== 'client') redirect(ACCESS_DENIED_PATH)
 
   const { count } = await supabase
     .from('notifications')

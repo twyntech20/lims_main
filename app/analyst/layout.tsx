@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import Sidebar from '@/components/layout/Sidebar'
+import { ACCESS_DENIED_PATH, portalForRole, portalHome } from '@/lib/auth/portal'
 
 export default async function AnalystLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createClient()
@@ -14,7 +15,12 @@ export default async function AnalystLayout({ children }: { children: React.Reac
     .eq('id', user.id)
     .single()
 
-  if (!profile || (profile as any).role !== 'analyst') redirect('/login')
+  // A client is refused the staff portal outright. Another staff role is not
+  // a portal violation, only the wrong staff area, so it goes to its own home
+  // rather than to /login — which previously bounced it straight back here.
+  if (!profile) redirect('/login')
+  if (portalForRole((profile as any).role) !== 'staff') redirect(ACCESS_DENIED_PATH)
+  if ((profile as any).role !== 'analyst') redirect(portalHome((profile as any).role))
 
   const { count } = await supabase
     .from('notifications')

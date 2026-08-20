@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import Sidebar from '@/components/layout/Sidebar'
+import { ACCESS_DENIED_PATH, portalForRole, portalHome } from '@/lib/auth/portal'
 import type { UserRole } from '@/lib/types/database'
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
@@ -15,7 +16,11 @@ export default async function AdminLayout({ children }: { children: React.ReactN
     .eq('id', user.id)
     .single()
 
-  if (!profile || !['admin', 'manager'].includes(profile.role)) redirect('/login')
+  // A client is refused the staff portal outright; an analyst is staff but
+  // not admin, so it goes to its own staff home.
+  if (!profile) redirect('/login')
+  if (portalForRole(profile.role) !== 'staff') redirect(ACCESS_DENIED_PATH)
+  if (!['admin', 'manager'].includes(profile.role)) redirect(portalHome(profile.role))
 
   const { count } = await supabase
     .from('notifications')

@@ -25,7 +25,7 @@ export default function StaffLoginPage() {
       return
     }
     router.refresh()
-    router.push('/')
+    router.push('/?portal=staff')
   }
 
   return (

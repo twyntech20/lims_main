@@ -1,5 +1,6 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
+import { ACCESS_DENIED_PATH, portalAccess, portalForRole } from '@/lib/auth/portal'
 
 const PUBLIC_PATHS = ['/login', '/client-login', '/auth/callback', '/auth/reset-password', '/update-password', '/force-password-change']
 
@@ -71,21 +72,26 @@ export async function proxy(request: NextRequest) {
     return NextResponse.redirect(new URL('/force-password-change', request.url))
   }
 
-  // Root redirect
+  // Root redirect. The login pages tag which portal was used, so signing in
+  // through the wrong one is explained rather than silently redirected.
   if (pathname === '/') {
+    const usedPortal = request.nextUrl.searchParams.get('portal')
+    if ((usedPortal === 'staff' || usedPortal === 'client') && portalForRole(role) !== usedPortal) {
+      return NextResponse.redirect(new URL(ACCESS_DENIED_PATH, request.url))
+    }
     return NextResponse.redirect(new URL(ROLE_HOME[role], request.url))
   }
 
-  // Route guard: clients cannot access admin/analyst routes
+  // Portal separation. Enforced here, before the route is invoked, so no
+  // protected markup or data is produced for a cross-portal request.
+  // portalAccess() is the shared rule, also applied by the portal layouts.
+  const access = portalAccess(role, pathname)
+  if (!access.allowed) {
+    return NextResponse.redirect(new URL(ACCESS_DENIED_PATH, request.url))
+  }
+
+  // Within the staff portal, /admin remains restricted to admin and manager.
   if (pathname.startsWith('/admin') && !['admin', 'manager'].includes(role)) {
-    return NextResponse.redirect(new URL(ROLE_HOME[role], request.url))
-  }
-
-  if (pathname.startsWith('/analyst') && role === 'client') {
-    return NextResponse.redirect(new URL(ROLE_HOME[role], request.url))
-  }
-
-  if (pathname.startsWith('/client') && role !== 'client') {
     return NextResponse.redirect(new URL(ROLE_HOME[role], request.url))
   }
 

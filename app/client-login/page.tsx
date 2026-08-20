@@ -25,7 +25,7 @@ export default function ClientLoginPage() {
       return
     }
     router.refresh()
-    router.push('/')
+    router.push('/?portal=client')
   }
 
   return (
