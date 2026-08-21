@@ -28,7 +28,60 @@ create index if not exists profiles_deleted_at_idx
   on profiles (deleted_at)
   where deleted_at is not null;
 
--- 2. Permanent purge -----------------------------------------------------
+-- 2. The delete itself ---------------------------------------------------
+-- One definer function bans the auth account and stamps the profile in a
+-- single transaction. The app calls it over the session client: an
+-- auth.admin ban needs SUPABASE_SERVICE_ROLE_KEY, which not every
+-- deployment carries (the committed .env.local does not), and the admin
+-- client constructor throws before anything has been revoked. Authorization
+-- is re-checked here because definer rights must never be reachable by a
+-- non-admin caller, whatever the app layer does.
+create or replace function soft_delete_user(target_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_caller uuid := auth.uid();
+begin
+  if v_caller is null or get_user_role(v_caller) is distinct from 'admin' then
+    raise exception 'Only admins can delete users';
+  end if;
+  if target_id = v_caller then
+    raise exception 'Cannot delete your own account';
+  end if;
+
+  update profiles
+     set deleted_at = now(),
+         is_active  = false
+   where id = target_id
+     and deleted_at is null;
+  if not found then
+    raise exception 'User not found or already deleted';
+  end if;
+
+  -- A concrete far-future timestamp, deliberately not 'infinity': GoTrue
+  -- scans banned_until into a Go time value and special values would break
+  -- every read of this row. Far longer than the retention window so access
+  -- cannot come back if the purge job ever stalls.
+  update auth.users
+     set banned_until = now() + interval '100 years'
+   where id = target_id;
+end;
+$$;
+
+comment on function soft_delete_user(uuid) is
+  'Atomic admin soft-delete: stamps profiles.deleted_at, deactivates, and '
+  'bans the auth account in one transaction. Caller must be an admin '
+  '(checked via auth.uid()). Purged permanently by purge_deleted_users() '
+  'after 30 days.';
+
+revoke all on function soft_delete_user(uuid) from public;
+revoke all on function soft_delete_user(uuid) from anon;
+grant execute on function soft_delete_user(uuid) to authenticated;
+
+-- 3. Permanent purge -----------------------------------------------------
 -- Deleting the auth user is what removes the profile, via the existing
 -- on delete cascade. Doing it in this order keeps the two in step and
 -- reuses the cascade already defined in schema.sql rather than adding a
@@ -66,7 +119,7 @@ revoke all on function purge_deleted_users() from public;
 revoke all on function purge_deleted_users() from anon;
 revoke all on function purge_deleted_users() from authenticated;
 
--- 3. Schedule ------------------------------------------------------------
+-- 4. Schedule ------------------------------------------------------------
 -- pg_cron is already installed and already runs check_overdue_orders and
 -- check_overdue_reviews hourly (see phase4_cron.sql); this follows the same
 -- shape. Daily is enough for a 30-day window.
@@ -78,3 +131,8 @@ select cron.schedule(
   '0 3 * * *',   -- daily, 03:00 UTC
   $$select public.purge_deleted_users()$$
 );
+
+-- Belt and braces: Supabase's DDL event triggers normally reload the
+-- PostgREST schema cache, but rpc('soft_delete_user') depends on it, so
+-- reload explicitly in case this file is applied where they are absent.
+notify pgrst, 'reload schema';
