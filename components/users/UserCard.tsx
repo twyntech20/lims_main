@@ -4,10 +4,10 @@ import { useState, useTransition } from 'react'
 
 import Link from 'next/link'
 import { toggleUserActive, deleteUser, resetUserPassword } from '@/app/actions/users'
-import { MoreVertical, KeyRound, Trash2, UserCheck, UserX, Edit, Mail, Phone } from 'lucide-react'
+import { MoreVertical, KeyRound, Trash2, UserCheck, UserX, Edit, Mail, Phone, Copy, Eye, EyeOff } from 'lucide-react'
 import toast, { Toaster } from 'react-hot-toast'
 import { cn } from '@/lib/utils'
-import { Badge, type Tone } from '@/components/ui/primitives'
+import { Badge, buttonClass, type Tone } from '@/components/ui/primitives'
 
 interface Profile {
   id: string
@@ -35,18 +35,45 @@ const ROLE_TONE: Record<string, Tone> = {
   admin: 'crit', manager: 'review', analyst: 'info', client: 'ok',
 }
 
+/* Uniform random integer in [0, max). Rejection sampling keeps every value
+   equally likely: taking a raw 32-bit draw modulo `max` would favour the
+   low end whenever max does not divide 2^32. */
+function randomIndex(max: number): number {
+  const limit = Math.floor(0xffffffff / max) * max
+  const buf = new Uint32Array(1)
+  let draw = 0
+  do {
+    crypto.getRandomValues(buf)
+    draw = buf[0]
+  } while (draw >= limit)
+  return draw % max
+}
+
+function pick(chars: string): string {
+  return chars[randomIndex(chars.length)]
+}
+
+/* Fourteen characters with at least one of each class, which satisfies the
+   twelve-character policy validatePassword() enforces server-side. The
+   alphabets deliberately omit I/O/l/0/1 so the password can be read aloud
+   or transcribed without ambiguity. */
 function generatePassword(): string {
   const upper = 'ABCDEFGHJKLMNPQRSTUVWXYZ'
   const lower = 'abcdefghjkmnpqrstuvwxyz'
   const digits = '23456789'
   const special = '!@#$%^&*'
   const all = upper + lower + digits + special
-  let pwd = upper[Math.floor(Math.random() * upper.length)]
-    + lower[Math.floor(Math.random() * lower.length)]
-    + digits[Math.floor(Math.random() * digits.length)]
-    + special[Math.floor(Math.random() * special.length)]
-  for (let i = 4; i < 14; i++) pwd += all[Math.floor(Math.random() * all.length)]
-  return pwd.split('').sort(() => Math.random() - 0.5).join('')
+
+  const chars = [pick(upper), pick(lower), pick(digits), pick(special)]
+  for (let i = 4; i < 14; i++) chars.push(pick(all))
+
+  // Fisher-Yates: the guaranteed characters must not stay in positions 0-3,
+  // and an unbiased shuffle is the only way to place them uniformly.
+  for (let i = chars.length - 1; i > 0; i--) {
+    const j = randomIndex(i + 1)
+    ;[chars[i], chars[j]] = [chars[j], chars[i]]
+  }
+  return chars.join('')
 }
 
 export default function UserCard({ profile, isAdmin, isSelf }: Props) {
@@ -54,6 +81,10 @@ export default function UserCard({ profile, isAdmin, isSelf }: Props) {
   const [toggling, startToggle] = useTransition()
   const [deleting, startDelete] = useTransition()
   const [resetting, startReset] = useTransition()
+  /* Holds the issued password only once Supabase has confirmed the change.
+     Null at every other moment, so a failed reset cannot reveal anything. */
+  const [issuedPassword, setIssuedPassword] = useState<string | null>(null)
+  const [passwordVisible, setPasswordVisible] = useState(false)
 
   const fullName = [profile.first_name, profile.last_name].filter(Boolean).join(' ') || profile.email
   const initials = (profile.first_name || profile.email)
@@ -93,17 +124,39 @@ export default function UserCard({ profile, isAdmin, isSelf }: Props) {
 
   function handleResetPassword() {
     setOpen(false)
+    if (!confirm(`Reset the password for "${fullName}"?\n\nA new temporary password will be generated and shown once Supabase has saved it.`)) return
+
+    /* One password, generated once. This exact value is what the server
+       action sends to Supabase and, on success, what the panel below
+       displays — the two can never diverge. */
     const newPwd = generatePassword()
-    if (!confirm(`Reset password for "${fullName}"?\n\nNew password: ${newPwd}\n\nCopy this — it won't be shown again.`)) return
+
     startReset(async () => {
       try {
         await resetUserPassword(profile.id, newPwd)
-        toast.success('Password reset. User will be prompted to change on next login.')
+        // Reached only when the password and the force_password_change flag
+        // were both written; the action throws on either failure.
+        setPasswordVisible(false)
+        setIssuedPassword(newPwd)
       } catch (err: any) {
         if (err?.digest?.startsWith('NEXT_REDIRECT')) throw err
-        toast.error(err.message ?? 'Failed')
+        setIssuedPassword(null)
+        toast.error(err?.message ?? 'Password reset failed — the password was not changed')
       }
     })
+  }
+
+  async function copyIssuedPassword() {
+    if (!issuedPassword) return
+    try {
+      await navigator.clipboard.writeText(issuedPassword)
+      toast.success('Password copied')
+    } catch {
+      // Clipboard access is refused outside a secure context; showing the
+      // password lets the administrator select it by hand instead.
+      setPasswordVisible(true)
+      toast.error('Could not copy — reveal the password and copy it manually')
+    }
   }
 
   return (
@@ -199,6 +252,51 @@ export default function UserCard({ profile, isAdmin, isSelf }: Props) {
           </div>
         </div>
       </div>
+
+      {issuedPassword && (
+        <div className="border-t border-ok-line bg-ok-bg px-4 py-3">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.06em] text-ok-fg">
+            Password reset successfully
+          </p>
+
+          <div className="mt-1.5 flex items-stretch gap-1.5">
+            <p
+              className="min-w-0 flex-1 truncate rounded-md border border-ok-line bg-surface px-2 py-1.5 font-mono text-[12.5px] text-ink"
+              title={passwordVisible ? issuedPassword : undefined}
+            >
+              {passwordVisible ? issuedPassword : '•'.repeat(issuedPassword.length)}
+            </p>
+            <button
+              type="button"
+              onClick={() => setPasswordVisible(v => !v)}
+              aria-label={passwordVisible ? 'Hide password' : 'Show password'}
+              className={buttonClass('secondary', 'sm', 'shrink-0')}
+            >
+              {passwordVisible
+                ? <><EyeOff className="h-3 w-3" /> Hide</>
+                : <><Eye className="h-3 w-3" /> Show</>}
+            </button>
+          </div>
+
+          <p className="mt-1.5 text-[11.5px] text-ink-2">
+            Use this password to test this account. The user will be required to
+            change it after login.
+          </p>
+
+          <div className="mt-2 flex gap-2">
+            <button type="button" onClick={copyIssuedPassword} className={buttonClass('secondary', 'sm')}>
+              <Copy className="h-3 w-3" /> Copy
+            </button>
+            <button
+              type="button"
+              onClick={() => { setIssuedPassword(null); setPasswordVisible(false) }}
+              className={buttonClass('ghost', 'sm')}
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
 
       {(profile.phone_number || (profile.role === 'client' && profile.company_name) || depts.length > 0 || specialties.length > 0) && (
         <div className="mt-auto space-y-1.5 border-t border-line px-4 py-2.5">

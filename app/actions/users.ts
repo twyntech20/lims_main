@@ -154,7 +154,26 @@ export async function resetUserPassword(targetId: string, newPassword: string) {
   const { error } = await adminSupabase.auth.admin.updateUserById(targetId, { password: newPassword })
   if (error) throw new Error(error.message)
 
-  await supabase.from('profiles').update({ force_password_change: true }).eq('id', targetId)
+  /* The password is live from here on. If the flag cannot be raised the reset
+     is still incomplete — the user would skip the forced change — so this
+     throws rather than reporting a success the caller would act on by
+     revealing the password. */
+  const { data: flagged, error: flagError } = await supabase
+    .from('profiles')
+    .update({ force_password_change: true })
+    .eq('id', targetId)
+    .select('id')
+  if (flagError) {
+    throw new Error(
+      `Password was updated but the forced-change flag could not be set: ${flagError.message}`
+    )
+  }
+  // A row-level policy that filters the row out reports no error, just an
+  // empty result, so the flag has to be confirmed by what came back.
+  if (!flagged?.length) {
+    throw new Error('Password was updated but the forced-change flag could not be set')
+  }
+
   revalidatePath('/admin/users')
 }
 
