@@ -65,7 +65,7 @@ export default async function AdminOrderDetailPage({ params }: Props) {
       `)
       .eq('id', id)
       .single(),
-    supabase.from('profiles').select('id, first_name, last_name, email').eq('role', 'analyst').order('first_name'),
+    supabase.from('profiles').select('id, first_name, last_name, email').eq('role', 'analyst').is('deleted_at', null).order('first_name'),
     supabase.from('tests').select('id, name, code, category').eq('is_active', true).order('category').order('name'),
   ])
 

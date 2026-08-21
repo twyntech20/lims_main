@@ -36,6 +36,7 @@ export default async function WorkQueuePage({ searchParams }: Props) {
     .from('profiles')
     .select('id, first_name, last_name, email')
     .in('role', ['analyst', 'admin', 'manager'])
+    .is('deleted_at', null)
     .order('first_name')
 
   // Reviewers available to assign to — matches the authorization check in
@@ -45,6 +46,7 @@ export default async function WorkQueuePage({ searchParams }: Props) {
     .select(REVIEWER_SELECT)
     .or('can_review.eq.true,role.in.(admin,manager)')
     .eq('is_active', true)
+    .is('deleted_at', null)
     .order('first_name')
 
   let query = supabase

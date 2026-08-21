@@ -19,6 +19,7 @@ export default async function AdminEditUserPage({ params }: Props) {
     .from('profiles')
     .select('*')
     .eq('id', id)
+    .is('deleted_at', null)
     .single()
 
   if (error || !profile) notFound()

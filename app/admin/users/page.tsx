@@ -27,6 +27,8 @@ export default async function AdminUsersPage({ searchParams }: Props) {
   let query = supabase
     .from('profiles')
     .select('id, email, first_name, last_name, role, is_active, phone_number, company_name, specialty_chemistry, specialty_microbiology, specialties_list, created_at')
+    // Soft-deleted accounts are retained for their data, not for display.
+    .is('deleted_at', null)
     .order('first_name')
 
   if (role !== 'all') query = query.eq('role', role)
@@ -37,7 +39,7 @@ export default async function AdminUsersPage({ searchParams }: Props) {
   const { data: profiles } = await query
 
   // Counts per role for tab badges
-  const { data: allProfiles } = await supabase.from('profiles').select('role, is_active')
+  const { data: allProfiles } = await supabase.from('profiles').select('role, is_active').is('deleted_at', null)
   const counts: Record<string, number> = { all: allProfiles?.length ?? 0 }
   for (const p of allProfiles ?? []) {
     counts[p.role] = (counts[p.role] ?? 0) + 1

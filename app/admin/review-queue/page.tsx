@@ -26,12 +26,14 @@ export default async function ReviewQueuePage({ searchParams }: Props) {
     .select('id, first_name, last_name, email')
     .or('can_review.eq.true,role.in.(admin,manager)')
     .eq('is_active', true)
+    .is('deleted_at', null)
     .order('first_name')
 
   const { data: analystProfiles } = await supabase
     .from('profiles')
     .select('id, first_name, last_name, email')
     .in('role', ['analyst', 'admin', 'manager'])
+    .is('deleted_at', null)
     .order('first_name')
 
   let query = supabase

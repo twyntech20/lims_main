@@ -43,7 +43,7 @@ export default async function AdminOrdersPage({ searchParams }: Props) {
       `)
       .order('created_at', { ascending: false }),
     supabase.from('profiles').select('id, first_name, last_name, email')
-      .in('role', ['analyst', 'admin', 'manager']).order('first_name'),
+      .in('role', ['analyst', 'admin', 'manager']).is('deleted_at', null).order('first_name'),
   ])
 
   const all = (orders ?? []) as any[]

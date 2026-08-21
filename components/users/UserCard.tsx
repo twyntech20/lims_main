@@ -4,6 +4,7 @@ import { useState, useTransition } from 'react'
 
 import Link from 'next/link'
 import { toggleUserActive, deleteUser, resetUserPassword } from '@/app/actions/users'
+import { USER_RETENTION_DAYS } from '@/lib/user-retention'
 import { MoreVertical, KeyRound, Trash2, UserCheck, UserX, Edit, Mail, Phone, Copy, Eye, EyeOff } from 'lucide-react'
 import toast, { Toaster } from 'react-hot-toast'
 import { cn } from '@/lib/utils'
@@ -110,11 +111,16 @@ export default function UserCard({ profile, isAdmin, isSelf }: Props) {
 
   function handleDelete() {
     setOpen(false)
-    if (!confirm(`Delete "${fullName}"? This cannot be undone.`)) return
+    if (!confirm(
+      `Delete "${fullName}"?\n\n` +
+      `The account will be removed from the active Users list and will no longer be able to sign in. ` +
+      `Its data is retained for ${USER_RETENTION_DAYS} days — laboratory records keep showing this person ` +
+      `as the analyst or reviewer — and is then permanently deleted.`
+    )) return
     startDelete(async () => {
       try {
         await deleteUser(profile.id)
-        toast.success('User deleted')
+        toast.success(`User deleted. Retained for ${USER_RETENTION_DAYS} days before permanent removal.`)
       } catch (err: any) {
         if (err?.digest?.startsWith('NEXT_REDIRECT')) throw err
         toast.error(err.message ?? 'Failed')

@@ -7,6 +7,7 @@ import {
   validateRequiredEmail, validateName, validateUserPhone,
   validateRole, assertNoErrors, ValidationError,
 } from '@/lib/validation'
+import { USER_RETENTION_DAYS } from '@/lib/user-retention'
 
 function validatePassword(password: string): string | null {
   if (password.length < 12)          return 'Password must be at least 12 characters'
@@ -177,6 +178,10 @@ export async function resetUserPassword(targetId: string, newPassword: string) {
   revalidatePath('/admin/users')
 }
 
+/* Withdraws a user from the active list without destroying anything.
+   A hard delete cascades from auth.users through profiles and nulls every
+   attribution column on historical laboratory records, so the row stays and
+   is only purged after the retention window. */
 export async function deleteUser(targetId: string) {
   const supabase      = await createClient()
   const adminSupabase = await createAdminClient()
@@ -186,7 +191,34 @@ export async function deleteUser(targetId: string) {
 
   if (targetId === user.id) throw new Error('Cannot delete your own account')
 
-  const { error } = await adminSupabase.auth.admin.deleteUser(targetId)
+  /* Revoke access first. Nothing in the app blocks an inactive user from
+     signing in, so leaving the account usable for the retention window
+     would hand a deleted user continued access. Banning is
+     reversible — lifting it takes ban_duration: 'none' — and it leaves the
+     account and its data intact for the retention period. */
+  const { error: banError } = await adminSupabase.auth.admin.updateUserById(targetId, {
+    // Deliberately far longer than the retention window. Matching the two
+    // would let the ban lapse and hand access back if the purge job ever
+    // stopped running.
+    ban_duration: '876000h',
+  })
+  if (banError) throw new Error(banError.message)
+
+  const { data: marked, error } = await supabase
+    .from('profiles')
+    .update({ deleted_at: new Date().toISOString(), is_active: false })
+    .eq('id', targetId)
+    .is('deleted_at', null)
+    .select('id')
   if (error) throw new Error(error.message)
+  // Access is already revoked at this point, so a failure here is safe but
+  // leaves the user listed. Saying so is better than reporting a deletion
+  // that did not happen; running Delete again completes it.
+  if (!marked?.length) {
+    throw new Error(
+      'Access was revoked but the account could not be marked as deleted. It is still listed — try Delete again.'
+    )
+  }
+
   revalidatePath('/admin/users')
 }
