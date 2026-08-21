@@ -65,7 +65,9 @@ export default async function AdminOrderDetailPage({ params }: Props) {
       `)
       .eq('id', id)
       .single(),
-    supabase.from('profiles').select('id, first_name, last_name, email').eq('role', 'analyst').is('deleted_at', null).order('first_name'),
+    supabase.from('profiles')
+      .select('id, first_name, last_name, email, role, specialty_chemistry, specialty_microbiology')
+      .eq('role', 'analyst').is('deleted_at', null).order('first_name'),
     supabase.from('tests').select('id, name, code, category').eq('is_active', true).order('category').order('name'),
   ])
 
@@ -76,6 +78,9 @@ export default async function AdminOrderDetailPage({ params }: Props) {
 
   const samples = order.samples ?? []
   const allSampleTests = samples.flatMap((s: any) => s.sample_tests ?? [])
+  // Departments this order covers, for the assignment picker. Derived from
+  // the tests already loaded above rather than a second query.
+  const orderCategories = allSampleTests.map((st: any) => st.tests?.category as string | null)
   const notApproved = allSampleTests.filter((st: any) => st.status !== 'approved')
   const approvedCount = allSampleTests.length - notApproved.length
   const readyToRelease = allSampleTests.length > 0 && notApproved.length === 0
@@ -378,6 +383,7 @@ export default async function AdminOrderDetailPage({ params }: Props) {
                 orderId={order.id}
                 currentAnalystId={order.assigned_analyst_id}
                 analysts={analysts}
+                orderCategories={orderCategories}
               />
             </Panel>
           </Section>

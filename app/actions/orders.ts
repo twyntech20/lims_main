@@ -8,6 +8,7 @@ import {
   validateMatrixType, validateDateOrder,
   assertNoErrors, ValidationError,
 } from '@/lib/validation'
+import { isQualifiedForOrder, orderLabCategories, labCategoryLabel } from '@/lib/workflow'
 
 export async function createOrder(formData: FormData) {
   const supabase = await createClient()
@@ -201,6 +202,40 @@ export async function assignAnalyst(orderId: string, analystId: string) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
+
+  /* An order is worked as one unit, so whoever holds it must cover every
+     department it contains. Checked here and not only in the picker: the
+     picker can be bypassed by calling this action directly. Clearing the
+     assignment has no analyst to qualify, so it skips the check. */
+  if (analystId) {
+    const [{ data: analyst, error: analystError }, { data: sampleRows, error: testsError }] =
+      await Promise.all([
+        supabase
+          .from('profiles')
+          .select('role, specialty_chemistry, specialty_microbiology')
+          .eq('id', analystId)
+          .single(),
+        supabase
+          .from('samples')
+          .select('sample_tests ( tests ( category ) )')
+          .eq('order_id', orderId),
+      ])
+    if (analystError) throw new Error(analystError.message)
+    if (testsError) throw new Error(testsError.message)
+    if (!analyst) throw new Error('That user no longer exists')
+
+    const categories = (sampleRows ?? []).flatMap((sample: any) =>
+      (sample.sample_tests ?? []).map((st: any) => st.tests?.category as string | null),
+    )
+
+    if (!isQualifiedForOrder(analyst, categories)) {
+      const required = orderLabCategories(categories).map(labCategoryLabel).join(' and ')
+      throw new Error(
+        `That analyst is not qualified for this order — it covers ${required} work, ` +
+        'which is outside their assigned specialty',
+      )
+    }
+  }
 
   const { error } = await supabase
     .from('orders')

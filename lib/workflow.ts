@@ -218,3 +218,43 @@ export function labCategoryLabel(category: string | null | undefined): string {
     : category === 'microbiology' ? 'Microbiology'
     : String(category ?? 'this department')
 }
+
+/**
+ * The distinct laboratory departments an order actually covers.
+ *
+ * tests.category is free text, not an enum, so anything outside the two known
+ * departments is dropped rather than guessed at — it has nothing to match a
+ * specialty flag against.
+ */
+export function orderLabCategories(
+  categories: readonly (string | null | undefined)[],
+): LabCategory[] {
+  const found = new Set<LabCategory>()
+  for (const category of categories) {
+    if (isLabCategory(category)) found.add(category)
+  }
+  return [...found]
+}
+
+/**
+ * Whether someone may take on a whole order.
+ *
+ * An order is assigned as a single unit, so its assignee has to cover every
+ * department in it: a mixed chemistry/microbiology order needs both flags,
+ * and a single-department order needs only its own. Built on
+ * isQualifiedForCategory so the admin/manager exemption and the
+ * unconfigured-analyst exemption behave exactly as they do for result entry.
+ *
+ * An order with no recognisable department restricts nobody — that is the
+ * behaviour before specialty gating existed, and inventing a restriction for
+ * an order the catalog cannot classify would block work for no stated reason.
+ */
+export function isQualifiedForOrder(
+  profile: SpecialtyProfile | null | undefined,
+  categories: readonly (string | null | undefined)[],
+): boolean {
+  if (!profile) return false
+  const required = orderLabCategories(categories)
+  if (required.length === 0) return true
+  return required.every(category => isQualifiedForCategory(profile, category))
+}
