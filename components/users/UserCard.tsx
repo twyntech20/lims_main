@@ -86,6 +86,10 @@ export default function UserCard({ profile, isAdmin, isSelf }: Props) {
      Null at every other moment, so a failed reset cannot reveal anything. */
   const [issuedPassword, setIssuedPassword] = useState<string | null>(null)
   const [passwordVisible, setPasswordVisible] = useState(false)
+  /* Delete asks in the page rather than through window.confirm(): a browser
+     that has suppressed native dialogs returns false from confirm() with no
+     dialog and no error, which silently swallowed the whole action. */
+  const [confirmingDelete, setConfirmingDelete] = useState(false)
 
   const fullName = [profile.first_name, profile.last_name].filter(Boolean).join(' ') || profile.email
   const initials = (profile.first_name || profile.email)
@@ -109,20 +113,26 @@ export default function UserCard({ profile, isAdmin, isSelf }: Props) {
     })
   }
 
+  // Opens the confirmation panel only. Nothing is deleted until the admin
+  // presses Delete inside it.
   function handleDelete() {
     setOpen(false)
-    if (!confirm(
-      `Delete "${fullName}"?\n\n` +
-      `The account will be removed from the active Users list and will no longer be able to sign in. ` +
-      `Its data is retained for ${USER_RETENTION_DAYS} days — laboratory records keep showing this person ` +
-      `as the analyst or reviewer — and is then permanently deleted.`
-    )) return
+    setConfirmingDelete(true)
+  }
+
+  function confirmDelete() {
+    if (deleting) return
     startDelete(async () => {
       try {
         await deleteUser(profile.id)
+        // revalidatePath in the action drops this card from the list; the
+        // panel is closed anyway so a failed revalidation cannot strand it.
+        setConfirmingDelete(false)
         toast.success(`User deleted. Retained for ${USER_RETENTION_DAYS} days before permanent removal.`)
       } catch (err: any) {
         if (err?.digest?.startsWith('NEXT_REDIRECT')) throw err
+        // Leave the panel open so the admin can retry or cancel, and say
+        // nothing that implies the account was removed.
         toast.error(err.message ?? 'Failed')
       }
     })
@@ -258,6 +268,48 @@ export default function UserCard({ profile, isAdmin, isSelf }: Props) {
           </div>
         </div>
       </div>
+
+      {confirmingDelete && (
+        <div
+          role="alertdialog"
+          aria-modal="false"
+          aria-labelledby={`delete-title-${profile.id}`}
+          aria-describedby={`delete-desc-${profile.id}`}
+          className="border-t border-crit-line bg-crit-bg px-4 py-3"
+        >
+          <p
+            id={`delete-title-${profile.id}`}
+            className="text-[11px] font-semibold uppercase tracking-[0.06em] text-crit-fg"
+          >
+            Delete this user?
+          </p>
+          <p id={`delete-desc-${profile.id}`} className="mt-1.5 text-[11.5px] text-ink-2">
+            <span className="font-medium text-ink">{fullName}</span> will be removed from the
+            active Users list and will no longer be able to sign in. The account is retained
+            for {USER_RETENTION_DAYS} days — laboratory records keep showing this person as the
+            analyst or reviewer — and is then permanently deleted.
+          </p>
+          <div className="mt-2 flex gap-2">
+            <button
+              type="button"
+              onClick={confirmDelete}
+              disabled={deleting}
+              autoFocus
+              className={buttonClass('danger', 'sm')}
+            >
+              <Trash2 className="h-3 w-3" /> {deleting ? 'Deleting…' : 'Delete'}
+            </button>
+            <button
+              type="button"
+              onClick={() => setConfirmingDelete(false)}
+              disabled={deleting}
+              className={buttonClass('secondary', 'sm')}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
 
       {issuedPassword && (
         <div className="border-t border-ok-line bg-ok-bg px-4 py-3">
