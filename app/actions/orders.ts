@@ -9,6 +9,7 @@ import {
   assertNoErrors, ValidationError,
 } from '@/lib/validation'
 import { isQualifiedForOrder, orderLabCategories, labCategoryLabel } from '@/lib/workflow'
+import { autoAssignAnalyst } from '@/lib/assignment'
 
 export async function createOrder(formData: FormData) {
   const supabase = await createClient()
@@ -175,6 +176,12 @@ export async function createOrder(formData: FormData) {
         .insert(testIds.map((tid) => ({ sample_id: sample.id, test_id: tid })))
     }
   }
+
+  /* Route the order now that its tests exist — the department mix is only
+     knowable once sample_tests are written. Leaves the order unassigned when
+     nobody qualifies, which is the state an administrator already resolves
+     through the picker. */
+  await autoAssignAnalyst(supabase, order.id)
 
   revalidatePath('/admin/orders')
   redirect(`/admin/orders/${order.id}`)
@@ -545,6 +552,13 @@ export async function clientSubmitOrder(formData: FormData) {
       await supabase.from('sample_tests').insert(testIds.map(tid => ({ sample_id: sample.id, test_id: tid })))
     }
   }
+
+  /* Same routing rule as lab-entered orders. Note this is a no-op today: the
+     client's own session cannot read analyst profiles or update orders under
+     RLS, so no candidate is ever found and the order stays unassigned for the
+     lab to pick up. Wiring it here keeps one rule in one place, and it starts
+     working the moment the call is given rights to act. */
+  await autoAssignAnalyst(supabase, order.id)
 
   revalidatePath('/client/orders')
   redirect(`/client/orders/${order.id}`)
