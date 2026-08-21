@@ -90,6 +90,10 @@ export default function UserCard({ profile, isAdmin, isSelf }: Props) {
      that has suppressed native dialogs returns false from confirm() with no
      dialog and no error, which silently swallowed the whole action. */
   const [confirmingDelete, setConfirmingDelete] = useState(false)
+  /* Reset asks in the page for the same reason Delete does: a browser that
+     has suppressed native dialogs returns false from confirm() with no
+     dialog and no error, which silently swallowed the whole action. */
+  const [confirmingReset, setConfirmingReset] = useState(false)
 
   const fullName = [profile.first_name, profile.last_name].filter(Boolean).join(' ') || profile.email
   const initials = (profile.first_name || profile.email)
@@ -138,9 +142,15 @@ export default function UserCard({ profile, isAdmin, isSelf }: Props) {
     })
   }
 
+  // Opens the confirmation panel only. No password is generated and nothing
+  // is sent to Supabase until the admin presses Reset password inside it.
   function handleResetPassword() {
     setOpen(false)
-    if (!confirm(`Reset the password for "${fullName}"?\n\nA new temporary password will be generated and shown once Supabase has saved it.`)) return
+    setConfirmingReset(true)
+  }
+
+  function confirmResetPassword() {
+    if (resetting) return
 
     /* One password, generated once. This exact value is what the server
        action sends to Supabase and, on success, what the panel below
@@ -152,10 +162,13 @@ export default function UserCard({ profile, isAdmin, isSelf }: Props) {
         await resetUserPassword(profile.id, newPwd)
         // Reached only when the password and the force_password_change flag
         // were both written; the action throws on either failure.
+        setConfirmingReset(false)
         setPasswordVisible(false)
         setIssuedPassword(newPwd)
       } catch (err: any) {
         if (err?.digest?.startsWith('NEXT_REDIRECT')) throw err
+        // Leave the panel open so the admin can retry or cancel, and reveal
+        // nothing: the old password is still the live one.
         setIssuedPassword(null)
         toast.error(err?.message ?? 'Password reset failed — the password was not changed')
       }
@@ -303,6 +316,48 @@ export default function UserCard({ profile, isAdmin, isSelf }: Props) {
               type="button"
               onClick={() => setConfirmingDelete(false)}
               disabled={deleting}
+              className={buttonClass('secondary', 'sm')}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {confirmingReset && (
+        <div
+          role="alertdialog"
+          aria-modal="false"
+          aria-labelledby={`reset-title-${profile.id}`}
+          aria-describedby={`reset-desc-${profile.id}`}
+          className="border-t border-line bg-surface-muted px-4 py-3"
+        >
+          <p
+            id={`reset-title-${profile.id}`}
+            className="text-[11px] font-semibold uppercase tracking-[0.06em] text-ink-2"
+          >
+            Reset this password?
+          </p>
+          <p id={`reset-desc-${profile.id}`} className="mt-1.5 text-[11.5px] text-ink-2">
+            A new temporary password will be generated for{' '}
+            <span className="font-medium text-ink">{fullName}</span> and shown here once
+            Supabase has saved it. Their current password stops working immediately, and they
+            will be asked to choose a new one at their next sign-in.
+          </p>
+          <div className="mt-2 flex gap-2">
+            <button
+              type="button"
+              onClick={confirmResetPassword}
+              disabled={resetting}
+              autoFocus
+              className={buttonClass('primary', 'sm')}
+            >
+              <KeyRound className="h-3 w-3" /> {resetting ? 'Resetting…' : 'Reset password'}
+            </button>
+            <button
+              type="button"
+              onClick={() => setConfirmingReset(false)}
+              disabled={resetting}
               className={buttonClass('secondary', 'sm')}
             >
               Cancel
